@@ -1,0 +1,212 @@
+/**
+ * Fleet Pulse — Utility helpers.
+ */
+
+/**
+ * Escape a string for safe insertion into innerHTML.
+ * Prevents XSS by converting HTML special characters to entities.
+ */
+export function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Sanitize user input before passing it into an AI prompt.
+ * Strips common prompt injection patterns, persona hijacking, and phrase overrides
+ * while preserving legitimate commercial vehicle data (e.g. Mack Bulldog, Dodge Ram).
+ */
+export function sanitizePromptInput(str) {
+  if (str == null) return '';
+  return String(str)
+    // Strip instruction override attempts
+    .replace(/ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?)/gi, '')
+    .replace(/system\s*:\s*/gi, '')
+    .replace(/\bdo\s+not\s+follow\b/gi, '')
+    .replace(/\breturn\s+only\b/gi, '')
+    // Strip persona / roleplay hijacking (e.g., "you are now a...", "act as a...", "pretend to be...", "speak like...")
+    .replace(/\b(you\s+are\s+(now\s+)?|act\s+as\s+|pretend\s+to\s+be\s+|adopt\s+(the\s+)?(persona|character|role)\s+of\s+|roleplay\s+as\s+|speak\s+like\s+|talk\s+like\s+)(a\s+|an\s+)?[\w\s]{1,30}/gi, '')
+    // Strip prefix/suffix injection commands (e.g., "start with...", "end with...", "always say...", "respond with the word...")
+    .replace(/\b(start|begin|end|conclude|respond|prefix|suffix)\s+(with|by\s+saying|with\s+the\s+phrase|with\s+the\s+word|with\s+the\s+sound)\s+["'“]?[^"'”\n]{1,50}["'”]?/gi, '')
+    // Strip animal sound / behavior commands (e.g. "bark like a dog", "bark and say woof", "meow")
+    .replace(/\b(bark|meow|woof)\s+(and\s+say\s+[\w\s]+|like\s+a\s+\w+)?/gi, '')
+    .trim()
+    .slice(0, 500); // Hard cap — no field needs more than 500 chars
+}
+
+/** Format a number with commas: 123456 → "123,456" */
+export function formatMileage(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString('en-US');
+}
+
+/** Format a date string as "Sep 29, 2026" */
+export function formatDate(isoStr) {
+  if (!isoStr) return '—';
+  const d = new Date(isoStr);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** Days since a given ISO date string */
+export function daysSince(isoStr) {
+  if (!isoStr) return Infinity;
+  const then = new Date(isoStr);
+  const now = new Date();
+  return Math.floor((now - then) / (1000 * 60 * 60 * 24));
+}
+
+/** Get staleness class based on days since last mileage update */
+export function getStalenessClass(lastUpdated) {
+  const days = daysSince(lastUpdated);
+  if (days <= 7) return 'staleness-fresh';
+  if (days <= 14) return 'staleness-stale';
+  return 'staleness-old';
+}
+
+/** Get staleness label */
+export function getStalenessLabel(lastUpdated) {
+  const days = daysSince(lastUpdated);
+  if (days === 0) return 'Updated today';
+  if (days === 1) return 'Updated yesterday';
+  if (days <= 7) return `Updated ${days}d ago`;
+  if (days <= 14) return `${days}d since update`;
+  if (days === Infinity) return 'Never updated';
+  return `${days}d since update`;
+}
+
+/**
+ * Determine PM status for a single maintenance item relative to current equipment state.
+ * Returns: { status: 'ok'|'due-soon'|'overdue', reason: string }
+ */
+export function getMaintenanceStatus(item, currentMileage, now = new Date()) {
+  if (!item.enabled) return { status: 'ok', reason: 'Disabled' };
+
+  let mileageStatus = 'ok';
+  let timeStatus = 'ok';
+  let reasons = [];
+
+  // Check mileage-based interval
+  if (item.mileageInterval && currentMileage != null) {
+    const lastMi = item.lastServiceMileage || 0;
+    const milesSince = currentMileage - lastMi;
+    const remaining = item.mileageInterval - milesSince;
+
+    if (remaining <= 0) {
+      mileageStatus = 'overdue';
+      reasons.push(`${formatMileage(Math.abs(remaining))} mi overdue`);
+    } else if (remaining <= item.mileageInterval * 0.15) {
+      mileageStatus = 'due-soon';
+      reasons.push(`${formatMileage(remaining)} mi remaining`);
+    }
+  }
+
+  // Check time-based interval
+  if (item.timeInterval) {
+    const lastDate = item.lastServiceDate ? new Date(item.lastServiceDate) : null;
+    if (lastDate) {
+      const daysSinceLast = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
+      const daysRemaining = item.timeInterval - daysSinceLast;
+
+      if (daysRemaining <= 0) {
+        timeStatus = 'overdue';
+        reasons.push(`${Math.abs(daysRemaining)} days overdue`);
+      } else if (daysRemaining <= item.timeInterval * 0.15) {
+        timeStatus = 'due-soon';
+        reasons.push(`${daysRemaining} days remaining`);
+      }
+    } else {
+      // No last service date — if equipment has been created for longer than the interval, it's overdue
+      // For new equipment, we give a grace period
+    }
+  }
+
+  // Whichever is worse wins
+  const worst =
+    mileageStatus === 'overdue' || timeStatus === 'overdue'
+      ? 'overdue'
+      : mileageStatus === 'due-soon' || timeStatus === 'due-soon'
+        ? 'due-soon'
+        : 'ok';
+
+  return {
+    status: worst,
+    reason: reasons.join(' · ') || (worst === 'ok' ? 'On track' : ''),
+  };
+}
+
+/**
+ * Show a toast notification.
+ */
+export function showToast(message, type = 'info') {
+  let container = document.querySelector('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 300ms ease';
+    setTimeout(() => toast.remove(), 300);
+  }, 3500);
+}
+
+/**
+ * Convert a File/Blob to a data URL for storage in IndexedDB.
+ */
+export function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Create an HTML element from a template literal string.
+ */
+export function html(strings, ...values) {
+  const str = strings.reduce((acc, s, i) => acc + s + (values[i] ?? ''), '');
+  const template = document.createElement('template');
+  template.innerHTML = str.trim();
+  return template.content;
+}
+
+/**
+ * Decode VIN using the NHTSA vPIC API (free, no key needed).
+ * Returns: { make, model, year, engineSize, fuelType, bodyClass, ... }
+ */
+export async function decodeVIN(vin) {
+  const url = `https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/${encodeURIComponent(vin)}?format=json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`NHTSA API error: ${res.status}`);
+  const data = await res.json();
+  const r = data.Results?.[0];
+  if (!r) throw new Error('No results from VIN decode');
+
+  return {
+    make: r.Make || '',
+    model: r.Model || '',
+    year: r.ModelYear || '',
+    engineSize: r.DisplacementL ? `${r.DisplacementL}L` : '',
+    engineCylinders: r.EngineCylinders || '',
+    fuelType: r.FuelTypePrimary || '',
+    bodyClass: r.BodyClass || '',
+    driveType: r.DriveType || '',
+    gvwr: r.GVWR || '',
+    errorCode: r.ErrorCode || '',
+    errorText: r.ErrorText || '',
+  };
+}
