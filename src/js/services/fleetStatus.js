@@ -1,4 +1,4 @@
-import { formatMileage, getMaintenanceStatus } from './utils.js';
+import { formatMileage, getMaintenanceStatus } from '../utils/utils.js';
 
 export function equipmentReading(eq) {
   if (eq.type === 'reefer') return eq.currentHours == null ? 'Hours not recorded' : `${formatMileage(eq.currentHours)} hrs`;

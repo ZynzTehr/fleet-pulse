@@ -9,7 +9,7 @@
  */
 
 import { openDB } from 'idb';
-import { databaseName, isDemoMode } from './appMode.js';
+import { databaseName, isDemoMode } from '../utils/appMode.js';
 import { createDemoData } from './demo.js';
 
 const DB_NAME = databaseName();

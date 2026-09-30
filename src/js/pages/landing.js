@@ -13,8 +13,8 @@
  *   7. Clicking the Pixel Ripple Button enters the dashboard.
  */
 
-import { initPixelRippleButton } from './pixelRipple.js';
-import { landingButtonLabel } from './appMode.js';
+import { initPixelRippleButton } from '../components/pixelRipple.js';
+import { landingButtonLabel } from '../utils/appMode.js';
 
 // Feature / Capability items for Carousel 1 (Moving Right to Left)
 const FEATURE_ITEMS = [

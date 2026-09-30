@@ -5,21 +5,21 @@
  * All data stored locally in IndexedDB.
  */
 
-import '../css/style.css';
-import { icons, logoSVG } from './icons.js';
-import * as db from './db.js';
-import { EQUIPMENT_TYPES, getDefaultMaintenanceItems } from './templates.js';
-import { readOdometer, readServiceRecord, testApiKey, lookupMaintenanceIntervals } from './ai.js';
-import { isDemoMode } from './appMode.js';
-import { renderWorkboard } from './dashboard.js';
-import { equipmentReading, serviceStatus } from './fleetStatus.js';
-import { openTutorial } from './tutorial.js';
+import '../../css/style.css';
+import { icons, logoSVG } from '../components/icons.js';
+import * as db from '../data/db.js';
+import { EQUIPMENT_TYPES, getDefaultMaintenanceItems } from '../data/templates.js';
+import { readOdometer, readServiceRecord, testApiKey, lookupMaintenanceIntervals } from '../services/ai.js';
+import { isDemoMode } from '../utils/appMode.js';
+import { renderWorkboard } from '../components/dashboard.js';
+import { equipmentReading, serviceStatus } from '../services/fleetStatus.js';
+import { openTutorial } from '../components/tutorial.js';
 import {
   renderGearsStageHTML,
   initGearsScroll,
   applyGearStyle,
   getGearStyle,
-} from './gears.js';
+} from '../components/gears.js';
 import {
   escapeHtml,
   formatMileage,
@@ -30,7 +30,8 @@ import {
   showToast,
   fileToDataURL,
   decodeVIN,
-} from './utils.js';
+  findSimilarServiceRecord,
+} from '../utils/utils.js';
 
 // ─── Theme Management ─────────────────────────────────────────
 
@@ -52,7 +53,7 @@ export function applyTheme(theme) {
   document.querySelectorAll('.theme-btn, .settings-theme-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.theme === theme);
     if (btn.classList.contains('settings-theme-btn')) {
-      btn.className = `btn ${btn.dataset.theme === theme ? 'btn-primary' : 'btn-secondary'} settings-theme-btn active`;
+      btn.className = `btn ${btn.dataset.theme === theme ? 'btn-primary' : 'btn-secondary'} settings-theme-btn${btn.dataset.theme === theme ? ' active' : ''}`;
     }
   });
 }
@@ -179,9 +180,9 @@ function renderShell() {
         <div class="theme-switcher-container">
           <span class="text-xs text-secondary" style="display:block;margin-bottom:0.35rem;font-weight:600;">Theme</span>
           <div class="theme-switcher">
-            <button class="theme-btn ${currentTheme === 'dark' ? 'active' : ''}" data-theme="dark" title="Dark theme">🌙 Dark</button>
-            <button class="theme-btn ${currentTheme === 'light' ? 'active' : ''}" data-theme="light" title="Light theme">☀️ Light</button>
-            <button class="theme-btn ${currentTheme === 'system' ? 'active' : ''}" data-theme="system" title="Device / System Auto">🌓 Auto</button>
+            <button class="theme-btn ${currentTheme === 'dark' ? 'active' : ''}" data-theme="dark" title="Dark theme">${icons.moon} Dark</button>
+            <button class="theme-btn ${currentTheme === 'light' ? 'active' : ''}" data-theme="light" title="Light theme">${icons.sun} Light</button>
+            <button class="theme-btn ${currentTheme === 'system' ? 'active' : ''}" data-theme="system" title="Device / System Auto">${icons.monitor} Auto</button>
           </div>
         </div>
         <div class="text-xs text-tertiary" style="padding: 0.25rem 0.5rem; margin-top: 0.5rem;">
@@ -432,7 +433,7 @@ function renderEquipmentDetail(container, eqId) {
           <div><span class="text-secondary text-sm">Type:</span> ${typeLabel}</div>
           <div><span class="text-secondary text-sm">Year/Make/Model:</span> ${escapeHtml(eq.year || '—')} ${escapeHtml(eq.make || '')} ${escapeHtml(eq.model || '')}</div>
           ${eq.engineSize ? `<div><span class="text-secondary text-sm">Engine:</span> ${escapeHtml(eq.engineSize)}</div>` : ''}
-          ${eq.vin ? `<div><span class="text-secondary text-sm">VIN:</span> <span class="font-mono text-sm">${eq.vin}</span></div>` : ''}
+          ${eq.vin ? `<div><span class="text-secondary text-sm">VIN:</span> <span class="font-mono text-sm">${escapeHtml(eq.vin)}</span></div>` : ''}
           <div>
             <span class="text-secondary text-sm">${eq.type === 'reefer' ? 'Hour meter:' : eq.type === 'trailer' ? 'Tracking:' : 'Mileage:'}</span>
             <strong>${equipmentReading(eq)}</strong>
@@ -526,6 +527,7 @@ function renderEquipmentDetail(container, eqId) {
                 <th>Shop</th>
                 <th>Cost</th>
                 <th>Image</th>
+                <th style="text-align:right">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -534,9 +536,13 @@ function renderEquipmentDetail(container, eqId) {
                   <td class="text-sm">${formatDate(r.date)}</td>
                   <td><strong>${escapeHtml(r.serviceType || '—')}</strong>${r.notes ? `<div class="text-xs text-tertiary">${escapeHtml(r.notes)}</div>` : ''}</td>
                   <td class="text-sm">${r.hours != null ? formatMileage(r.hours) + ' hrs' : r.mileage != null ? formatMileage(r.mileage) + ' mi' : '—'}</td>
-                  <td class="text-sm">${r.shopName || '—'}</td>
+                  <td class="text-sm">${escapeHtml(r.shopName || '—')}</td>
                   <td class="text-sm">${r.cost != null ? '$' + Number(r.cost).toFixed(2) : '—'}</td>
                   <td>${r.image ? `<img src="${r.image}" alt="Receipt" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer;" class="record-thumb" data-src="${r.image}" />` : '—'}</td>
+                  <td style="text-align:right;white-space:nowrap;">
+                    <button class="btn btn-ghost btn-sm btn-edit-record" data-record-id="${r.id}" title="Edit Record">${icons.edit}</button>
+                    <button class="btn btn-ghost btn-sm btn-delete-record text-red" data-record-id="${r.id}" title="Delete Record">${icons.trash}</button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -599,6 +605,26 @@ function renderEquipmentDetail(container, eqId) {
   if (addRecordBtn) {
     addRecordBtn.addEventListener('click', () => showAddRecordModal(eq));
   }
+
+  // Edit record buttons
+  container.querySelectorAll('.btn-edit-record').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const recId = Number(btn.dataset.recordId);
+      const rec = allRecords.find((r) => r.id === recId);
+      if (rec) showEditRecordModal(eq, rec);
+    });
+  });
+
+  // Delete record buttons
+  container.querySelectorAll('.btn-delete-record').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const recId = Number(btn.dataset.recordId);
+      const rec = allRecords.find((r) => r.id === recId);
+      if (rec) confirmDeleteRecord(rec, eq);
+    });
+  });
 
   // Record thumbnail click → full view
   container.querySelectorAll('.record-thumb').forEach((thumb) => {
@@ -710,6 +736,7 @@ function renderRecordsPage(container) {
               <th>Reading</th>
               <th>Shop</th>
               <th>Cost</th>
+              <th style="text-align:right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -725,8 +752,12 @@ function renderRecordsPage(container) {
                   </td>
                   <td>${escapeHtml(r.serviceType || '—')}</td>
                   <td class="text-sm">${r.hours != null ? formatMileage(r.hours) + ' hrs' : r.mileage != null ? formatMileage(r.mileage) + ' mi' : '—'}</td>
-                  <td class="text-sm">${r.shopName || '—'}</td>
+                  <td class="text-sm">${escapeHtml(r.shopName || '—')}</td>
                   <td class="text-sm">${r.cost != null ? '$' + Number(r.cost).toFixed(2) : '—'}</td>
+                  <td style="text-align:right;white-space:nowrap;">
+                    <button class="btn btn-ghost btn-sm btn-edit-record" data-record-id="${r.id}" title="Edit Record">${icons.edit}</button>
+                    <button class="btn btn-ghost btn-sm btn-delete-record text-red" data-record-id="${r.id}" title="Delete Record">${icons.trash}</button>
+                  </td>
                 </tr>
               `;
             }).join('')}
@@ -744,6 +775,30 @@ function renderRecordsPage(container) {
 
   container.querySelectorAll('.eq-link').forEach((link) => {
     link.addEventListener('click', () => navigate(`equipment-detail/${link.dataset.eqId}`));
+  });
+
+  container.querySelectorAll('.btn-edit-record').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const recId = Number(btn.dataset.recordId);
+      const rec = allRecords.find((r) => r.id === recId);
+      if (rec) {
+        const eq = allEquipment.find((e) => e.id === rec.equipmentId);
+        showEditRecordModal(eq, rec);
+      }
+    });
+  });
+
+  container.querySelectorAll('.btn-delete-record').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const recId = Number(btn.dataset.recordId);
+      const rec = allRecords.find((r) => r.id === recId);
+      if (rec) {
+        const eq = allEquipment.find((e) => e.id === rec.equipmentId);
+        confirmDeleteRecord(rec, eq);
+      }
+    });
   });
 }
 
@@ -846,7 +901,7 @@ function renderOdometerPage(container) {
 
   // OCR upload
   if (odometerFile) {
-    odometerFile.addEventListener('change', async (e) => {
+    async function handleOdometerFile(e) {
       const file = e.target.files[0];
       if (!file) return;
 
@@ -856,7 +911,7 @@ function renderOdometerPage(container) {
       uploadZone.innerHTML = `<img src="${previewUrl}" alt="Odometer photo" /><input type="file" accept="image/*" id="odometer-file" capture="environment" />`;
 
       // Re-attach file listener
-      uploadZone.querySelector('#odometer-file').addEventListener('change', arguments.callee);
+      uploadZone.querySelector('#odometer-file').addEventListener('change', handleOdometerFile);
 
       // Call AI
       ocrResult.classList.remove('hidden');
@@ -897,7 +952,8 @@ function renderOdometerPage(container) {
           </div>
         `;
       }
-    });
+    }
+    odometerFile.addEventListener('change', handleOdometerFile);
   }
 
   // Save mileage
@@ -966,13 +1022,13 @@ function renderSettingsPage(container) {
         </p>
         <div class="flex gap-sm mb-lg" style="flex-wrap:wrap;">
           <button class="btn ${currentTheme === 'dark' ? 'btn-primary' : 'btn-secondary'} settings-theme-btn" data-theme="dark">
-            🌙 Dark Mode
+            ${icons.moon} Dark Mode
           </button>
           <button class="btn ${currentTheme === 'light' ? 'btn-primary' : 'btn-secondary'} settings-theme-btn" data-theme="light">
-            ☀️ Light Mode
+            ${icons.sun} Light Mode
           </button>
           <button class="btn ${currentTheme === 'system' ? 'btn-primary' : 'btn-secondary'} settings-theme-btn" data-theme="system">
-            🌓 Device / System Auto
+            ${icons.monitor} Device / System Auto
           </button>
         </div>
         <div class="settings-gears"><h4 class="text-sm">Gear style</h4><div class="gear-theme-switcher">
@@ -1102,12 +1158,23 @@ function renderSettingsPage(container) {
   });
 
   // Clear all
-  container.querySelector('#btn-clear-all').addEventListener('click', async () => {
-    if (confirm('DELETE ALL DATA? This cannot be undone. Export a backup first if needed.')) {
-      await db.importAllData({ version: 1, equipment: [], maintenance: [], records: [], settings: [] });
-      showToast('All data cleared', 'info');
-      renderPage();
-    }
+  container.querySelector('#btn-clear-all').addEventListener('click', () => {
+    showModal(
+      'Delete All Data',
+      `<p class="text-secondary mb-md">This will permanently delete <strong>all equipment, maintenance schedules, and service records</strong> from Fleet Pulse.</p>
+       <p class="text-red text-sm">This action cannot be undone. Export a backup first if needed.</p>`,
+      `<button class="btn btn-secondary" id="modal-cancel-clear">Cancel</button>
+       <button class="btn btn-danger" id="modal-confirm-clear">${icons.trash} Delete Everything</button>`,
+      (overlay, close) => {
+        overlay.querySelector('#modal-cancel-clear').addEventListener('click', close);
+        overlay.querySelector('#modal-confirm-clear').addEventListener('click', async () => {
+          await db.importAllData({ version: 1, equipment: [], maintenance: [], records: [], settings: [] });
+          close();
+          showToast('All data cleared', 'info');
+          renderPage();
+        });
+      }
+    );
   });
 }
 
@@ -1228,15 +1295,16 @@ function showAddEquipmentModal() {
     const photoFile = overlay.querySelector('#eq-photo-file');
     const photoZone = overlay.querySelector('#eq-photo-zone');
 
-    photoFile.addEventListener('change', async (e) => {
+    async function handleAddPhoto(e) {
       const file = e.target.files[0];
       if (!file) return;
       photoDataURL = await fileToDataURL(file);
       photoZone.classList.add('has-image');
       photoZone.innerHTML = `<img src="${photoDataURL}" alt="Equipment photo" /><input type="file" accept="image/*" id="eq-photo-file" />`;
       // Re-attach
-      photoZone.querySelector('#eq-photo-file').addEventListener('change', arguments.callee);
-    });
+      photoZone.querySelector('#eq-photo-file').addEventListener('change', handleAddPhoto);
+    }
+    photoFile.addEventListener('change', handleAddPhoto);
 
     // VIN decode
     overlay.querySelector('#btn-decode-vin').addEventListener('click', async () => {
@@ -1378,14 +1446,15 @@ function showEditEquipmentModal(eq) {
     const photoFile = overlay.querySelector('#eq-photo-file');
     const photoZone = overlay.querySelector('#eq-photo-zone');
 
-    photoFile.addEventListener('change', async (e) => {
+    async function handleEditPhoto(e) {
       const file = e.target.files[0];
       if (!file) return;
       photoDataURL = await fileToDataURL(file);
       photoZone.classList.add('has-image');
       photoZone.innerHTML = `<img src="${photoDataURL}" alt="Equipment photo" /><input type="file" accept="image/*" id="eq-photo-file" />`;
-      photoZone.querySelector('#eq-photo-file').addEventListener('change', arguments.callee);
-    });
+      photoZone.querySelector('#eq-photo-file').addEventListener('change', handleEditPhoto);
+    }
+    photoFile.addEventListener('change', handleEditPhoto);
 
     overlay.querySelector('#modal-cancel').addEventListener('click', close);
 
@@ -1416,6 +1485,62 @@ function showEditEquipmentModal(eq) {
       showToast(`Unit ${unitNumber} updated`, 'success');
       close();
       renderPage();
+    });
+  });
+}
+
+function showDuplicateRecordWarningModal(existingRecord, eq, onSaveAnyway, onModalDismiss) {
+  const isReefer = eq ? eq.type === 'reefer' : existingRecord.hours != null;
+  const readingLabel = isReefer ? 'Hours' : 'Mileage';
+  const readingVal = isReefer ? existingRecord.hours : existingRecord.mileage;
+  const unitNumber = eq?.unitNumber ? `Unit ${escapeHtml(eq.unitNumber)}` : `Unit #${existingRecord.equipmentId}`;
+
+  const body = `
+    <div class="alert-item alert-item-yellow mb-md">
+      ${icons.alertTriangle}
+      <div>
+        <strong>Similar Service Record Found</strong>
+        <p class="text-sm mt-xs" style="color:var(--text-secondary);">
+          A service entry with the same service type (<strong>${escapeHtml(existingRecord.serviceType)}</strong>) on <strong>${formatDate(existingRecord.date)}</strong> already exists for <strong>${unitNumber}</strong>.
+        </p>
+      </div>
+    </div>
+
+    <div class="card mb-md p-sm" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);">
+      <div class="text-xs text-secondary mb-xs font-semibold" style="letter-spacing:0.05em;text-transform:uppercase;">Existing Entry Details</div>
+      <div class="grid grid-2 gap-xs text-sm">
+        <div><span class="text-secondary">Service:</span> <strong>${escapeHtml(existingRecord.serviceType)}</strong></div>
+        <div><span class="text-secondary">Date:</span> <strong>${formatDate(existingRecord.date)}</strong></div>
+        ${readingVal != null ? `<div><span class="text-secondary">${readingLabel}:</span> <strong>${formatMileage(readingVal)} ${isReefer ? 'hrs' : 'mi'}</strong></div>` : ''}
+        ${existingRecord.shopName ? `<div><span class="text-secondary">Shop:</span> <strong>${escapeHtml(existingRecord.shopName)}</strong></div>` : ''}
+        ${existingRecord.cost != null ? `<div><span class="text-secondary">Cost:</span> <strong>$${Number(existingRecord.cost).toFixed(2)}</strong></div>` : ''}
+      </div>
+      ${existingRecord.notes ? `<div class="text-xs text-secondary mt-xs" style="font-style:italic;">Notes: "${escapeHtml(existingRecord.notes)}"</div>` : ''}
+    </div>
+
+    <p class="text-sm text-secondary">
+      Would you like to <strong>update that existing record</strong> instead, or save this as an additional separate entry?
+    </p>
+  `;
+
+  const footer = `
+    <button class="btn btn-ghost" id="warn-cancel">Cancel</button>
+    <button class="btn btn-secondary" id="warn-save-separate">Save as Separate Entry</button>
+    <button class="btn btn-primary" id="warn-update-existing">${icons.checkCircle} Update Existing Record</button>
+  `;
+
+  showModal('Similar Service Entry', body, footer, (overlay, close) => {
+    overlay.querySelector('#warn-cancel').addEventListener('click', close);
+
+    overlay.querySelector('#warn-save-separate').addEventListener('click', async () => {
+      close();
+      await onSaveAnyway();
+    });
+
+    overlay.querySelector('#warn-update-existing').addEventListener('click', () => {
+      close();
+      if (onModalDismiss) onModalDismiss(true);
+      showEditRecordModal(eq, existingRecord);
     });
   });
 }
@@ -1476,37 +1601,54 @@ function showLogServiceModal(eq, maintId) {
       const cost = Number(overlay.querySelector('#log-cost').value) || null;
       const notes = overlay.querySelector('#log-notes').value.trim();
 
-      // Update the maintenance item's last service
-      await db.updateMaintenance(maintId, {
-        lastServiceDate: date,
-        lastServiceMileage: mileage,
-        lastServiceHours: hours,
-      });
-
-      // Create a service record
-      await db.addRecord({
-        equipmentId: eq.id,
-        date,
-        mileage,
-        hours,
-        serviceType: m.name,
-        shopName,
-        cost,
-        notes,
-      });
-
-      // Also update the equipment's mileage if provided and newer
-      const field = eq.type === 'reefer' ? 'currentHours' : 'currentMileage';
-      if (reading != null && eq.type !== 'trailer' && (eq[field] == null || reading >= eq[field])) {
-        await db.updateEquipment(eq.id, {
-          [field]: reading,
-          mileageUpdatedAt: new Date().toISOString(),
+      const performSave = async () => {
+        // Update the maintenance item's last service
+        await db.updateMaintenance(maintId, {
+          lastServiceDate: date,
+          lastServiceMileage: mileage,
+          lastServiceHours: hours,
         });
+
+        // Create a service record
+        await db.addRecord({
+          equipmentId: eq.id,
+          date,
+          mileage,
+          hours,
+          serviceType: m.name,
+          shopName,
+          cost,
+          notes,
+        });
+
+        // Also update the equipment's mileage if provided and newer
+        const field = eq.type === 'reefer' ? 'currentHours' : 'currentMileage';
+        if (reading != null && eq.type !== 'trailer' && (eq[field] == null || reading >= eq[field])) {
+          await db.updateEquipment(eq.id, {
+            [field]: reading,
+            mileageUpdatedAt: new Date().toISOString(),
+          });
+        }
+
+        showToast(`${m.name} logged for Unit ${eq.unitNumber}`, 'success');
+        close();
+        renderPage();
+      };
+
+      const existingRecords = await db.getRecordsForEquipment(eq.id);
+      const similar = findSimilarServiceRecord(
+        { equipmentId: eq.id, date, serviceType: m.name },
+        existingRecords
+      );
+
+      if (similar) {
+        showDuplicateRecordWarningModal(similar, eq, performSave, (shouldCloseParent) => {
+          if (shouldCloseParent) close();
+        });
+        return;
       }
 
-      showToast(`${m.name} logged for Unit ${eq.unitNumber}`, 'success');
-      close();
-      renderPage();
+      await performSave();
     });
   });
 }
@@ -1572,7 +1714,7 @@ function showAddRecordModal(eq) {
     // Record image upload with OCR
     const recordFile = overlay.querySelector('#record-file');
     if (recordFile) {
-      recordFile.addEventListener('change', async (e) => {
+      async function handleRecordFile(e) {
         const file = e.target.files[0];
         if (!file) return;
 
@@ -1580,7 +1722,7 @@ function showAddRecordModal(eq) {
         const uploadZone = overlay.querySelector('#record-upload-zone');
         uploadZone.classList.add('has-image');
         uploadZone.innerHTML = `<img src="${recordImageDataURL}" alt="Service record" /><input type="file" accept="image/*" id="record-file" />`;
-        uploadZone.querySelector('#record-file').addEventListener('change', arguments.callee);
+        uploadZone.querySelector('#record-file').addEventListener('change', handleRecordFile);
 
         // AI extraction
         const ocrResult = overlay.querySelector('#record-ocr-result');
@@ -1625,7 +1767,8 @@ function showAddRecordModal(eq) {
             </div>
           `;
         }
-      });
+      }
+      recordFile.addEventListener('change', handleRecordFile);
     }
 
     overlay.querySelector('#modal-cancel').addEventListener('click', close);
@@ -1638,24 +1781,241 @@ function showAddRecordModal(eq) {
         showToast('Service type is required', 'error');
         return;
       }
+      if (!date) {
+        showToast('Service date is required', 'error');
+        return;
+      }
 
-      await db.addRecord({
-        equipmentId: eq.id,
-        date,
-        mileage: eq.type === 'tractor' && overlay.querySelector('#rec-mileage').value !== '' ? Number(overlay.querySelector('#rec-mileage').value) : null,
-        hours: eq.type === 'reefer' && overlay.querySelector('#rec-mileage').value !== '' ? Number(overlay.querySelector('#rec-mileage').value) : null,
-        serviceType,
-        shopName: overlay.querySelector('#rec-shop').value.trim(),
-        cost: Number(overlay.querySelector('#rec-cost').value) || null,
-        notes: overlay.querySelector('#rec-notes').value.trim(),
-        image: recordImageDataURL,
-      });
+      const rawReading = overlay.querySelector('#rec-mileage').value;
+      const reading = rawReading !== '' ? Number(rawReading) : null;
+      if (reading != null && (!Number.isFinite(reading) || reading < 0)) {
+        showToast('Please enter a valid non-negative reading', 'error');
+        return;
+      }
 
-      showToast(`Record added for Unit ${eq.unitNumber}`, 'success');
-      close();
-      renderPage();
+      const costRaw = overlay.querySelector('#rec-cost').value;
+      const cost = costRaw !== '' ? Number(costRaw) : null;
+      const mileage = eq.type === 'tractor' ? reading : null;
+      const hours = eq.type === 'reefer' ? reading : null;
+      const shopName = overlay.querySelector('#rec-shop').value.trim();
+      const notes = overlay.querySelector('#rec-notes').value.trim();
+
+      const performSave = async () => {
+        await db.addRecord({
+          equipmentId: eq.id,
+          date,
+          mileage,
+          hours,
+          serviceType,
+          shopName,
+          cost,
+          notes,
+          image: recordImageDataURL,
+        });
+
+        // Also update equipment mileage if provided and higher
+        const field = eq.type === 'reefer' ? 'currentHours' : 'currentMileage';
+        if (reading != null && eq.type !== 'trailer' && (eq[field] == null || reading >= eq[field])) {
+          await db.updateEquipment(eq.id, {
+            [field]: reading,
+            mileageUpdatedAt: new Date().toISOString(),
+          });
+        }
+
+        showToast(`Record added for Unit ${eq.unitNumber}`, 'success');
+        close();
+        renderPage();
+      };
+
+      const existingRecords = await db.getRecordsForEquipment(eq.id);
+      const similar = findSimilarServiceRecord(
+        { equipmentId: eq.id, date, serviceType },
+        existingRecords
+      );
+
+      if (similar) {
+        showDuplicateRecordWarningModal(similar, eq, performSave, (shouldCloseParent) => {
+          if (shouldCloseParent) close();
+        });
+        return;
+      }
+
+      await performSave();
     });
   });
+}
+
+function showEditRecordModal(eq, record) {
+  let recordImageDataURL = record.image || null;
+  const equipment = eq || allEquipment.find((e) => e.id === record.equipmentId);
+  const unitLabel = equipment ? `Unit ${escapeHtml(equipment.unitNumber)}` : `Unit #${record.equipmentId}`;
+  const isReefer = equipment ? equipment.type === 'reefer' : record.hours != null;
+  const isTrailer = equipment ? equipment.type === 'trailer' : false;
+  const readingLabel = isReefer ? 'Hours' : 'Mileage';
+  const currentReading = isReefer ? (record.hours ?? '') : (record.mileage ?? '');
+
+  const body = `
+    <p class="text-secondary text-sm mb-md">
+      Editing service record for <strong>${unitLabel}</strong>
+    </p>
+
+    <div class="form-group mb-md">
+      <label class="form-label">Service Record Image (optional)</label>
+      <div class="photo-upload ${recordImageDataURL ? 'has-image' : ''}" id="record-upload-zone" style="aspect-ratio:4/3;">
+        ${recordImageDataURL ? `<img src="${recordImageDataURL}" alt="Service record" />` : `${icons.upload}<span>Click to upload receipt or invoice image</span>`}
+        <input type="file" accept="image/*" id="record-file" />
+      </div>
+      <div class="flex gap-sm mt-xs ${recordImageDataURL ? '' : 'hidden'}" id="record-image-remove-wrap">
+        <button type="button" class="btn btn-ghost btn-sm text-red" id="btn-remove-record-image">
+          ${icons.trash} Remove image
+        </button>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" for="edit-rec-date">Date</label>
+        <input type="date" class="form-input" id="edit-rec-date" value="${record.date ? escapeHtml(record.date.slice(0, 10)) : ''}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="edit-rec-mileage">${readingLabel}</label>
+        <input type="number" class="form-input" id="edit-rec-mileage" value="${currentReading}" min="0" ${isTrailer ? 'disabled placeholder="Tracked by date"' : ''} />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="edit-rec-service">Service Type</label>
+      <input type="text" class="form-input" id="edit-rec-service" value="${escapeHtml(record.serviceType || '')}" placeholder="e.g. Oil Change, Brake Adjustment" />
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" for="edit-rec-shop">Shop Name</label>
+        <input type="text" class="form-input" id="edit-rec-shop" value="${escapeHtml(record.shopName || '')}" placeholder="Optional" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="edit-rec-cost">Cost</label>
+        <input type="number" class="form-input" id="edit-rec-cost" value="${record.cost != null ? record.cost : ''}" placeholder="Optional" step="0.01" min="0" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="edit-rec-notes">Notes</label>
+      <textarea class="form-textarea" id="edit-rec-notes" placeholder="Optional notes...">${escapeHtml(record.notes || '')}</textarea>
+    </div>
+  `;
+
+  const footer = `
+    <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+    <button class="btn btn-primary" id="modal-save">${icons.checkCircle} Save Changes</button>
+  `;
+
+  showModal('Edit Service Record', body, footer, (overlay, close) => {
+    const uploadZone = overlay.querySelector('#record-upload-zone');
+    const removeBtn = overlay.querySelector('#btn-remove-record-image');
+    const removeWrap = overlay.querySelector('#record-image-remove-wrap');
+
+    async function handleEditRecordFile(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      recordImageDataURL = await fileToDataURL(file);
+      uploadZone.classList.add('has-image');
+      uploadZone.innerHTML = `<img src="${recordImageDataURL}" alt="Service record" /><input type="file" accept="image/*" id="record-file" />`;
+      uploadZone.querySelector('#record-file').addEventListener('change', handleEditRecordFile);
+      if (removeWrap) removeWrap.classList.remove('hidden');
+    }
+
+    const recordFile = overlay.querySelector('#record-file');
+    if (recordFile) recordFile.addEventListener('change', handleEditRecordFile);
+
+    if (removeBtn) {
+      removeBtn.addEventListener('click', () => {
+        recordImageDataURL = null;
+        uploadZone.classList.remove('has-image');
+        uploadZone.innerHTML = `${icons.upload}<span>Click to upload receipt or invoice image</span><input type="file" accept="image/*" id="record-file" />`;
+        uploadZone.querySelector('#record-file').addEventListener('change', handleEditRecordFile);
+        if (removeWrap) removeWrap.classList.add('hidden');
+      });
+    }
+
+    overlay.querySelector('#modal-cancel').addEventListener('click', close);
+
+    overlay.querySelector('#modal-save').addEventListener('click', async () => {
+      const date = overlay.querySelector('#edit-rec-date').value;
+      const serviceType = overlay.querySelector('#edit-rec-service').value.trim();
+      const rawReading = overlay.querySelector('#edit-rec-mileage').value;
+      const reading = rawReading !== '' ? Number(rawReading) : null;
+
+      if (!serviceType) {
+        showToast('Service type is required', 'error');
+        return;
+      }
+      if (!date) {
+        showToast('Service date is required', 'error');
+        return;
+      }
+      if (reading != null && (!Number.isFinite(reading) || reading < 0)) {
+        showToast('Please enter a valid non-negative reading', 'error');
+        return;
+      }
+
+      const costRaw = overlay.querySelector('#edit-rec-cost').value;
+      const cost = costRaw !== '' ? Number(costRaw) : null;
+      const targetEqId = equipment ? equipment.id : record.equipmentId;
+
+      const performUpdate = async () => {
+        await db.updateRecord(record.id, {
+          date,
+          mileage: isReefer || isTrailer ? null : reading,
+          hours: isReefer ? reading : null,
+          serviceType,
+          shopName: overlay.querySelector('#edit-rec-shop').value.trim(),
+          cost,
+          notes: overlay.querySelector('#edit-rec-notes').value.trim(),
+          image: recordImageDataURL,
+        });
+
+        showToast('Service record updated', 'success');
+        close();
+        renderPage();
+      };
+
+      const existingRecords = await db.getRecordsForEquipment(targetEqId);
+      const similar = findSimilarServiceRecord(
+        { equipmentId: targetEqId, date, serviceType },
+        existingRecords,
+        { excludeId: record.id }
+      );
+
+      if (similar) {
+        showDuplicateRecordWarningModal(similar, equipment || { id: targetEqId, unitNumber: `#${targetEqId}` }, performUpdate, (shouldCloseParent) => {
+          if (shouldCloseParent) close();
+        });
+        return;
+      }
+
+      await performUpdate();
+    });
+  });
+}
+
+function confirmDeleteRecord(record, eq) {
+  const equipment = eq || allEquipment.find((e) => e.id === record.equipmentId);
+  const unitLabel = equipment ? `Unit ${escapeHtml(equipment.unitNumber)}` : `Unit #${record.equipmentId}`;
+  showModal(
+    'Delete Service Record',
+    `<p class="text-secondary mb-md">Delete service record for <strong>${escapeHtml(record.serviceType || 'Service')}</strong> on ${formatDate(record.date)} (${unitLabel})?</p>
+     <p class="text-red text-sm">This action cannot be undone.</p>`,
+    `<button class="btn btn-secondary" id="modal-cancel-del-rec">Cancel</button>
+     <button class="btn btn-danger" id="modal-confirm-del-rec">${icons.trash} Delete Record</button>`,
+    (overlay, close) => {
+      overlay.querySelector('#modal-cancel-del-rec').addEventListener('click', close);
+      overlay.querySelector('#modal-confirm-del-rec').addEventListener('click', async () => {
+        await db.deleteRecord(record.id);
+        close();
+        showToast('Service record deleted', 'info');
+        renderPage();
+      });
+    }
+  );
 }
 
 function showAILookupModal(eq) {

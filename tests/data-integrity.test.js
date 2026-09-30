@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { importAllData } from '../src/js/db.js';
+import { importAllData } from '../src/js/data/db.js';
 
 // Note: These tests run against the real IndexedDB (via idb).
 // In a Node/Vitest environment without a browser, IndexedDB may

@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" width="900" height="260">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0e17"/>
+      <stop offset="50%" stop-color="#0f1724"/>
+      <stop offset="100%" stop-color="#0a0e17"/>
+    </linearGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="18"/></filter>
+    <filter id="glow"><feGaussianBlur stdDeviation="4"/></filter>
+    <filter id="softglow"><feGaussianBlur stdDeviation="2.5"/></filter>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#22d3ee" stroke-width="0.3" stroke-opacity="0.08"/>
+    </pattern>
+
+    <!-- Gradient that fades the pulse at both ends -->
+    <linearGradient id="pulseGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0"/>
+      <stop offset="8%" stop-color="#22d3ee" stop-opacity="1"/>
+      <stop offset="92%" stop-color="#22d3ee" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Clip so the glow doesn't bleed outside the banner -->
+    <clipPath id="bannerClip">
+      <rect width="900" height="260" rx="12"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="260" fill="url(#bg)" rx="12"/>
+  <rect width="900" height="260" fill="url(#grid)" rx="12" opacity="0.6"/>
+  <ellipse cx="450" cy="80" rx="280" ry="45" fill="#22d3ee" opacity="0.04" filter="url(#blur)"/>
+
+  <!-- Subtitle accent lines -->
+  <line x1="80" y1="120" x2="310" y2="120" stroke="#22d3ee" stroke-opacity="0.12" stroke-width="0.5"/>
+  <line x1="590" y1="120" x2="820" y2="120" stroke="#22d3ee" stroke-opacity="0.12" stroke-width="0.5"/>
+
+  <!-- Text -->
+  <text x="450" y="72" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="52" fill="white" letter-spacing="-1">Fleet Pulse</text>
+  <text x="450" y="105" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-weight="400" font-size="15" fill="#94a3b8" letter-spacing="4">PREVENTIVE MAINTENANCE INTELLIGENCE</text>
+
+  <!-- ================================================================== -->
+  <!-- ANIMATED PULSE — EKG / heart-monitor style                         -->
+  <!--                                                                    -->
+  <!-- The pulse draws itself left-to-right using stroke-dashoffset        -->
+  <!-- animation, like a medical device trace.                             -->
+  <!--                                                                    -->
+  <!-- Three layers:                                                      -->
+  <!--   1. Outer glow (blurred, wide stroke, low opacity)                -->
+  <!--   2. Inner glow (slightly blurred, medium stroke)                  -->
+  <!--   3. Core line (crisp, thin, bright)                               -->
+  <!--                                                                    -->
+  <!-- The pulse has flat segments with periodic spikes (P-QRS-T pattern) -->
+  <!-- ================================================================== -->
+
+  <g clip-path="url(#bannerClip)">
+
+    <!-- ===== THE PULSE PATH ===== -->
+    <!--
+      Baseline: y=185
+      The path has two "heartbeat" spike groups and flat segments between.
+      Each spike group loosely follows an ECG waveform:
+        flat → small P bump → sharp QRS spike → recovery T wave → flat
+    -->
+
+    <!-- Layer 1: outer glow -->
+    <polyline
+      points="
+        -20,185
+        120,185
+        148,185   153,178   158,185
+        185,185
+        210,185   218,195   225,140   235,210   245,165   255,185
+        340,185
+        368,178   373,172   378,185
+        405,185
+        430,185   438,195   445,130   455,215   465,158   475,185
+        560,185
+        588,185   593,178   598,185
+        625,185
+        650,185   658,195   665,138   675,212   685,162   695,185
+        780,185
+        808,185   813,178   818,185
+        920,185
+      "
+      fill="none" stroke="#22d3ee" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"
+      opacity="0.08" filter="url(#glow)"
+      stroke-dasharray="1600" stroke-dashoffset="1600">
+      <animate attributeName="stroke-dashoffset" from="1600" to="0" dur="3s" fill="freeze" begin="0.3s"/>
+    </polyline>
+
+    <!-- Layer 2: inner glow -->
+    <polyline
+      points="
+        -20,185
+        120,185
+        148,185   153,178   158,185
+        185,185
+        210,185   218,195   225,140   235,210   245,165   255,185
+        340,185
+        368,178   373,172   378,185
+        405,185
+        430,185   438,195   445,130   455,215   465,158   475,185
+        560,185
+        588,185   593,178   598,185
+        625,185
+        650,185   658,195   665,138   675,212   685,162   695,185
+        780,185
+        808,185   813,178   818,185
+        920,185
+      "
+      fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"
+      opacity="0.20" filter="url(#softglow)"
+      stroke-dasharray="1600" stroke-dashoffset="1600">
+      <animate attributeName="stroke-dashoffset" from="1600" to="0" dur="3s" fill="freeze" begin="0.3s"/>
+    </polyline>
+
+    <!-- Layer 3: core line (crisp, bright) -->
+    <polyline
+      points="
+        -20,185
+        120,185
+        148,185   153,178   158,185
+        185,185
+        210,185   218,195   225,140   235,210   245,165   255,185
+        340,185
+        368,178   373,172   378,185
+        405,185
+        430,185   438,195   445,130   455,215   465,158   475,185
+        560,185
+        588,185   593,178   598,185
+        625,185
+        650,185   658,195   665,138   675,212   685,162   695,185
+        780,185
+        808,185   813,178   818,185
+        920,185
+      "
+      fill="none" stroke="url(#pulseGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+      opacity="0.55"
+      stroke-dasharray="1600" stroke-dashoffset="1600">
+      <animate attributeName="stroke-dashoffset" from="1600" to="0" dur="3s" fill="freeze" begin="0.3s"/>
+    </polyline>
+
+    <!-- Layer 4: bright dot that traces the line (the "cursor") -->
+    <circle cx="-20" cy="185" r="4" fill="#22d3ee" opacity="0">
+      <animate attributeName="opacity" values="0;0.6;0.6;0" keyTimes="0;0.01;0.95;1" dur="3.3s" fill="freeze" begin="0.3s"/>
+      <animateMotion dur="3s" fill="freeze" begin="0.3s" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
+        <mpath href="#tracePath"/>
+      </animateMotion>
+    </circle>
+    <circle cx="-20" cy="185" r="12" fill="#22d3ee" opacity="0" filter="url(#glow)">
+      <animate attributeName="opacity" values="0;0.15;0.15;0" keyTimes="0;0.01;0.95;1" dur="3.3s" fill="freeze" begin="0.3s"/>
+      <animateMotion dur="3s" fill="freeze" begin="0.3s" keyPoints="0;1" keyTimes="0;1" calcMode="linear">
+        <mpath href="#tracePath"/>
+      </animateMotion>
+    </circle>
+
+    <!-- Hidden path for animateMotion to follow -->
+    <path id="tracePath" d="
+      M -20,185
+      L 120,185
+      L 148,185  L 153,178  L 158,185
+      L 185,185
+      L 210,185  L 218,195  L 225,140  L 235,210  L 245,165  L 255,185
+      L 340,185
+      L 368,178  L 373,172  L 378,185
+      L 405,185
+      L 430,185  L 438,195  L 445,130  L 455,215  L 465,158  L 475,185
+      L 560,185
+      L 588,185  L 593,178  L 598,185
+      L 625,185
+      L 650,185  L 658,195  L 665,138  L 675,212  L 685,162  L 695,185
+      L 780,185
+      L 808,185  L 813,178  L 818,185
+      L 920,185
+    " fill="none" stroke="none"/>
+
+  </g>
+
+  <!-- Tagline -->
+  <text x="450" y="245" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-weight="400" font-size="13.5" fill="#64748b">
+    Offline-first fleet tracking · Gemini Vision OCR · Human-in-the-loop AI · 109 tests passing
+  </text>
+
+  <!-- Corner accents -->
+  <path d="M12 0 L0 0 L0 12" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-opacity="0.25" transform="translate(8,8)"/>
+  <path d="M-12 0 L0 0 L0 12" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-opacity="0.25" transform="translate(892,8)"/>
+  <path d="M12 0 L0 0 L0 -12" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-opacity="0.25" transform="translate(8,252)"/>
+  <path d="M-12 0 L0 0 L0 -12" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-opacity="0.25" transform="translate(892,252)"/>
+</svg>

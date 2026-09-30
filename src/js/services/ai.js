@@ -8,7 +8,7 @@
  * Design principle: NEVER auto-save. Always return the result for user confirmation.
  */
 
-import { sanitizePromptInput } from './utils.js';
+import { sanitizePromptInput } from '../utils/utils.js';
 
 /**
  * Convert a File or Blob to a base64 data string.

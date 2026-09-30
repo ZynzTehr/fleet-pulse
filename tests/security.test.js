@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, sanitizePromptInput, formatMileage } from '../src/js/utils.js';
+import { escapeHtml, sanitizePromptInput, formatMileage } from '../src/js/utils/utils.js';
 
 // ─── XSS Prevention ──────────────────────────────────────────
 

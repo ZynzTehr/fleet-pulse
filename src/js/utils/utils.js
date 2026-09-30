@@ -210,3 +210,64 @@ export async function decodeVIN(vin) {
     errorText: r.ErrorText || '',
   };
 }
+
+/**
+ * Normalize a service type string for comparison.
+ * Trims, lowers case, replaces symbols (& with and, hyphens/underscores/slashes with spaces),
+ * and collapses multiple whitespace.
+ */
+export function normalizeServiceType(str) {
+  if (str == null) return '';
+  return String(str)
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[-_/]/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Check if two service type strings represent the same service.
+ */
+export function isSameServiceType(typeA, typeB) {
+  const normA = normalizeServiceType(typeA);
+  const normB = normalizeServiceType(typeB);
+  if (!normA || !normB) return false;
+  return normA === normB;
+}
+
+/**
+ * Check if a similar service record already exists for the same equipment on the same date.
+ *
+ * Rules:
+ *   - Same equipmentId AND exact same calendar date (YYYY-MM-DD)
+ *   - Same service type (via normalized comparison)
+ *   - Does NOT warn if dates differ (even with identical service/mileage)
+ *   - Does NOT warn for distinct extra services on the same date (e.g. oil change vs. lube vs. air cleaner)
+ *   - Excludes self if editing an existing record (options.excludeId)
+ *
+ * Returns the matching existing record, or null if no duplicate found.
+ */
+export function findSimilarServiceRecord(newRecord, existingRecords = [], options = {}) {
+  if (!newRecord || !newRecord.date || !newRecord.serviceType) return null;
+  const newDate = String(newRecord.date).slice(0, 10);
+  const excludeId = options.excludeId ?? newRecord.id;
+
+  for (const rec of existingRecords) {
+    if (!rec) continue;
+    if (excludeId != null && rec.id === excludeId) continue;
+    if (newRecord.equipmentId != null && rec.equipmentId !== newRecord.equipmentId) continue;
+
+    const recDate = rec.date ? String(rec.date).slice(0, 10) : '';
+    // Must be on the exact same date — different dates never trigger a warning
+    if (!recDate || recDate !== newDate) continue;
+
+    // Check if the service types match
+    if (isSameServiceType(rec.serviceType, newRecord.serviceType)) {
+      return rec;
+    }
+  }
+
+  return null;
+}
+

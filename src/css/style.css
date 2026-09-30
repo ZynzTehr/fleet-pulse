@@ -1126,7 +1126,7 @@ h3 { font-size: 1.1rem; font-weight: 600; line-height: 1.4; }
   --bg-surface-hover: #f1f5f9;
   --bg-elevated: #ffffff;
   --bg-card: #ffffff;
-  --bg-card-hover: #f8fafc;
+  --bg-card-hover: #ecfeff;
   --bg-input: #f1f5f9;
 
   --border-subtle: rgba(0, 0, 0, 0.08);
@@ -1155,7 +1155,7 @@ h3 { font-size: 1.1rem; font-weight: 600; line-height: 1.4; }
     --bg-surface-hover: #f1f5f9;
     --bg-elevated: #ffffff;
     --bg-card: #ffffff;
-    --bg-card-hover: #f8fafc;
+    --bg-card-hover: #ecfeff;
     --bg-input: #f1f5f9;
 
     --border-subtle: rgba(0, 0, 0, 0.08);

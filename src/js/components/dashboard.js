@@ -1,6 +1,6 @@
 import { icons } from './icons.js';
-import { escapeHtml, getStalenessLabel, getStalenessClass, daysSince } from './utils.js';
-import { equipmentReading, equipmentStatus, serviceStatus } from './fleetStatus.js';
+import { escapeHtml, getStalenessLabel, getStalenessClass, daysSince } from '../utils/utils.js';
+import { equipmentReading, equipmentStatus, serviceStatus } from '../services/fleetStatus.js';
 
 export function renderWorkboard(container, { equipment, maintenance, records, demo, navigate, logService, addEquipment, setupSchedule }) {
   const items = equipment.flatMap((eq) => maintenance.filter((m) => m.equipmentId === eq.id && m.enabled)

@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getMaintenanceStatus, formatDate, daysSince } from '../src/js/utils.js';
+import { getMaintenanceStatus, formatDate, daysSince } from '../src/js/utils/utils.js';
 
 // Helper: create a date N days ago
 function daysAgo(n) {

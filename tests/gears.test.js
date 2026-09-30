@@ -4,7 +4,7 @@ import {
   SCROLL_SENSITIVITY,
   calculateGearAngles,
   renderGearsStageHTML,
-} from '../src/js/gears.js';
+} from '../src/js/components/gears.js';
 
 describe('Background 3-Gear System', () => {
   describe('Kinematic Calculations & Meshing Physics', () => {

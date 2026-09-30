@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { databaseName, isDemoMode, landingButtonLabel } from '../src/js/appMode.js';
-import { createDemoData } from '../src/js/demo.js';
-import { equipmentReading, equipmentStatus, serviceStatus } from '../src/js/fleetStatus.js';
+import { databaseName, isDemoMode, landingButtonLabel } from '../src/js/utils/appMode.js';
+import { createDemoData } from '../src/js/data/demo.js';
+import { equipmentReading, equipmentStatus, serviceStatus } from '../src/js/services/fleetStatus.js';
 
 const storage = vi.hoisted(() => ({ databases: new Map(), opens: vi.fn() }));
 vi.mock('idb', () => ({
@@ -20,6 +20,7 @@ vi.mock('idb', () => ({
       getAll: async (store) => [...stores[store].values()].map(copy),
       put: async (store, item) => put(store, item),
       add: async (store, item) => put(store, item),
+      delete: async (store, key) => stores[store].delete(key),
       transaction: () => ({
         objectStore: (store) => ({ clear: async () => stores[store].clear(), put: async (item) => put(store, item) }),
         done: Promise.resolve(),
@@ -33,7 +34,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); storage.databases.cl
 async function openStore(search) {
   vi.stubGlobal('location', { search });
   vi.resetModules();
-  return import('../src/js/db.js');
+  return import('../src/js/data/db.js');
 }
 
 describe('demo isolation and entry', () => {
@@ -74,6 +75,29 @@ describe('demo isolation and entry', () => {
     expect(after.settings).toEqual(before.settings);
     expect(after.records).toEqual(before.records);
     expect(storage.opens.mock.calls.map(([name]) => name)).toEqual(['fleet-pulse', 'fleet-pulse-demo']);
+  });
+  it('supports updating and deleting service records', async () => {
+    const demo = await openStore('?demo=1');
+    await demo.initializeDemo();
+    const records = await demo.getAllRecords();
+    expect(records.length).toBeGreaterThan(0);
+    const firstRec = records[0];
+
+    // Update record
+    await demo.updateRecord(firstRec.id, {
+      cost: 599.99,
+      notes: 'Updated service notes after correcting shop invoice',
+    });
+    const updatedRecords = await demo.getAllRecords();
+    const found = updatedRecords.find((r) => r.id === firstRec.id);
+    expect(found.cost).toBe(599.99);
+    expect(found.notes).toBe('Updated service notes after correcting shop invoice');
+
+    // Delete record
+    await demo.deleteRecord(firstRec.id);
+    const afterDelete = await demo.getAllRecords();
+    expect(afterDelete.find((r) => r.id === firstRec.id)).toBeUndefined();
+    expect(afterDelete.length).toBe(records.length - 1);
   });
 });
 

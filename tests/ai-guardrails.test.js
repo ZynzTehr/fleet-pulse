@@ -11,7 +11,7 @@ import {
   validateMaintenanceItem,
   checkMonotonicity,
   SANITY_BOUNDS,
-} from '../src/js/ai.js';
+} from '../src/js/services/ai.js';
 
 // ─── Sanity Bounds: Should CATCH bad intervals ───────────────
 

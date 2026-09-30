@@ -6,7 +6,7 @@
  * interactive Pixel Ripple launch button, and navigates to dashboard.html.
  */
 
-import '../css/style.css';
+import '../../css/style.css';
 import { renderLandingPage } from './landing.js';
 
 // Apply saved theme or system preference
