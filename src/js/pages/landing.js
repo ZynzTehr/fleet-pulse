@@ -351,6 +351,28 @@ const BRAND_ITEMS = [
       <text x="66" y="26" font-family="'Inter', 'Arial Black', sans-serif" font-weight="900" font-size="17" fill="#ffffff" letter-spacing="1.5">EATON</text>
       <text x="66" y="42" font-family="'Inter', sans-serif" font-weight="800" font-size="12" fill="#38bdf8" letter-spacing="2">FULLER</text>
     </svg>`
+  },
+  {
+    name: 'Thermo King',
+    specialty: 'Transport Refrigeration & APU',
+    svg: `<svg width="160" height="54" viewBox="0 0 160 54" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Thermo King Text-Only Wordmark -->
+      <text x="80" y="23" text-anchor="middle" font-family="'Arial Black', 'Impact', sans-serif" font-weight="900" font-size="18" fill="#ffffff" letter-spacing="1.5">THERMO</text>
+      <text x="80" y="45" text-anchor="middle" font-family="'Arial Black', 'Impact', sans-serif" font-weight="900" font-size="18" fill="#0098DB" letter-spacing="1.5">KING</text>
+    </svg>`
+  },
+  {
+    name: 'Carrier',
+    specialty: 'Reefer Units & Cold Chain',
+    svg: `<svg width="170" height="54" viewBox="0 0 170 54" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Carrier Classic Blue Oval Logo -->
+      <!-- Outer Blue Oval -->
+      <ellipse cx="85" cy="27" rx="78" ry="24" fill="#1B3F8B"/>
+      <!-- Inner White Pinstripe Border -->
+      <ellipse cx="85" cy="27" rx="72" ry="20" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+      <!-- Carrier Script Wordmark (Italic) -->
+      <text x="85" y="33" text-anchor="middle" font-family="'Brush Script MT', 'Dancing Script', 'Pacifico', 'Caveat', cursive, serif" font-weight="400" font-size="32" font-style="italic" fill="#ffffff" letter-spacing="1">Carrier</text>
+    </svg>`
   }
 ];
 

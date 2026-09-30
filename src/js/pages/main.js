@@ -825,11 +825,14 @@ function renderOdometerPage(container) {
 
         ${hasApiKey ? `
           <div class="form-group mb-md">
-            <label class="form-label">Upload Odometer Photo</label>
+            <label class="form-label" id="meter-upload-label">Upload Odometer Photo</label>
             <div class="photo-upload" id="odometer-upload-zone">
               ${icons.camera}
-              <span>Click or drag to upload odometer photo</span>
+              <span id="meter-upload-text">Click or drag to upload odometer photo</span>
               <input type="file" accept="image/*" id="odometer-file" capture="environment" />
+            </div>
+            <div id="reefer-guide" class="text-sm mt-xs hidden" style="color:var(--text-muted);line-height:1.4;">
+              💡 <strong>Reefer Guide:</strong> Photograph the <strong>Hourmeters / Gauges</strong> screen (Thermo King: <em>Menu &rarr; Hourmeters / Gauges</em> &bull; Carrier: <em>Unit / Engine Hours</em>).
             </div>
           </div>
           <div id="ocr-result" class="hidden"></div>
@@ -874,11 +877,30 @@ function renderOdometerPage(container) {
   function updateReadingLabels() {
     const eq = allEquipment.find((item) => item.id === Number(unitSelect.value));
     const hours = eq?.type === 'reefer';
-    container.querySelector('label[for="manual-mileage"]').textContent = hours ? 'Enter current engine hours' : 'Enter current mileage';
+    const uploadLabel = container.querySelector('#meter-upload-label');
+    const uploadText = container.querySelector('#meter-upload-text');
+    const reeferGuide = container.querySelector('#reefer-guide');
+
+    container.querySelector('label[for="manual-mileage"]').textContent = hours
+      ? (hasApiKey ? 'Or enter engine hours manually' : 'Enter engine hours manually')
+      : (hasApiKey ? 'Or enter mileage manually' : 'Enter mileage manually');
     manualInput.placeholder = hours ? 'e.g. 8420' : 'e.g. 234567';
     saveBtn.innerHTML = `${icons.checkCircle} ${hours ? 'Update hours' : 'Update mileage'}`;
-    // Odometer OCR returns miles; keep reefer hours manual until hour-meter OCR is supported.
-    if (uploadZone) uploadZone.parentElement.classList.toggle('hidden', hours);
+
+    if (uploadLabel) {
+      uploadLabel.textContent = hours ? 'Upload Hour-Meter Photo' : 'Upload Odometer Photo';
+    }
+    if (uploadText) {
+      uploadText.textContent = hours
+        ? 'Click or drag to upload reefer hour-meter photo'
+        : 'Click or drag to upload odometer photo';
+    }
+    if (reeferGuide) {
+      reeferGuide.classList.toggle('hidden', !hours);
+    }
+    // Upload zone remains active for both trucks and reefers
+    if (uploadZone) uploadZone.parentElement.classList.remove('hidden');
+
     ocrResult?.classList.add('hidden');
     pendingMileage = null;
     manualInput.value = '';
@@ -905,50 +927,61 @@ function renderOdometerPage(container) {
       const file = e.target.files[0];
       if (!file) return;
 
+      const eq = allEquipment.find((item) => item.id === Number(unitSelect.value));
+      const hours = eq?.type === 'reefer';
+
       // Show preview
       const previewUrl = URL.createObjectURL(file);
       uploadZone.classList.add('has-image');
-      uploadZone.innerHTML = `<img src="${previewUrl}" alt="Odometer photo" /><input type="file" accept="image/*" id="odometer-file" capture="environment" />`;
+      uploadZone.innerHTML = `<img src="${previewUrl}" alt="${hours ? 'Hour meter photo' : 'Odometer photo'}" /><input type="file" accept="image/*" id="odometer-file" capture="environment" />`;
 
       // Re-attach file listener
       uploadZone.querySelector('#odometer-file').addEventListener('change', handleOdometerFile);
 
       // Call AI
       ocrResult.classList.remove('hidden');
-      ocrResult.innerHTML = `<div class="card" style="text-align:center;padding:2rem;"><div style="animation:pulse 1.5s infinite;">Reading odometer...</div></div>`;
+      ocrResult.innerHTML = `<div class="card" style="text-align:center;padding:2rem;"><div style="animation:pulse 1.5s infinite;">Reading ${hours ? 'hour meter' : 'odometer'}...</div></div>`;
 
       try {
-        const result = await readOdometer(appSettings.geminiApiKey, file);
+        const result = await readOdometer(appSettings.geminiApiKey, file, { isHours: hours });
 
         if (result.mileage != null) {
           pendingMileage = result.mileage;
           const confColor = result.confidence === 'high' ? 'var(--status-green)' : result.confidence === 'medium' ? 'var(--status-yellow)' : 'var(--status-red)';
+          const formattedReading = hours ? `${Number(result.mileage).toLocaleString()} hrs` : formatMileage(result.mileage);
 
           ocrResult.innerHTML = `
             <div class="ocr-confirm">
               <div class="ocr-note">AI reading <span style="color:${confColor};font-weight:600;">(${result.confidence} confidence)</span></div>
-              <div class="ocr-reading">${formatMileage(result.mileage)}</div>
+              <div class="ocr-reading">${formattedReading}</div>
               <div class="ocr-note">${escapeHtml(result.raw)}</div>
               <div class="ocr-note" style="color:var(--status-yellow);">
-                ${icons.alertTriangle} Please verify this reading matches your odometer photo before saving.
+                ${icons.alertTriangle} Please verify this reading matches your ${hours ? 'hour-meter' : 'odometer'} photo before saving.
               </div>
             </div>
           `;
           manualInput.value = result.mileage;
           checkReady();
         } else {
+          const fallbackMsg = hours
+            ? (result.raw || 'Could not read the hour meter. Please ensure the Hourmeters / Gauges screen is visible and enter hours manually.')
+            : (result.isOdometer === false ? 'This does not appear to be an odometer image.' : 'Could not read the odometer.') + ' Please enter the mileage manually.';
           ocrResult.innerHTML = `
             <div class="alert-item alert-item-red">
               ${icons.alertTriangle}
-              <span>${result.isOdometer === false ? 'This does not appear to be an odometer image.' : 'Could not read the odometer.'} ${escapeHtml(result.raw)} <br>Please enter the mileage manually.</span>
+              <span>${escapeHtml(fallbackMsg)}</span>
             </div>
           `;
         }
       } catch (err) {
+        console.error('Meter OCR error:', err);
+        const failMsg = hours
+          ? 'Unable to read hour meter automatically. Please enter engine hours manually.'
+          : 'Unable to read image automatically. Please enter mileage manually.';
         ocrResult.innerHTML = `
           <div class="alert-item alert-item-red">
             ${icons.alertTriangle}
-            <span>Error reading image: ${escapeHtml(err.message)}. Please enter mileage manually.</span>
+            <span>${failMsg}</span>
           </div>
         `;
       }
@@ -1760,10 +1793,11 @@ function showAddRecordModal(eq) {
             `;
           }
         } catch (err) {
+          console.error('Service record OCR error:', err);
           ocrResult.innerHTML = `
             <div class="alert-item alert-item-red">
               ${icons.alertTriangle}
-              <span>AI error: ${err.message}. Fill in details manually.</span>
+              <span>Unable to analyze service record automatically. Please enter details manually below.</span>
             </div>
           `;
         }
@@ -2182,10 +2216,11 @@ function showAILookupModal(eq) {
         overlay._aiResult = result;
 
       } catch (err) {
+        console.error('Interval lookup error:', err);
         resultArea.innerHTML = `
           <div class="alert-item alert-item-red">
             ${icons.alertTriangle}
-            <span>Error: ${err.message}</span>
+            <span>Unable to retrieve intervals automatically. Please use default templates or enter intervals manually.</span>
           </div>
         `;
       }

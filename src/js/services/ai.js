@@ -25,6 +25,142 @@ async function fileToBase64(file) {
   });
 }
 
+export const FALLBACK_FLASH_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+];
+
+let cachedFlashModel = typeof localStorage !== 'undefined'
+  ? localStorage.getItem('fleet_pulse_gemini_model')
+  : null;
+
+/**
+ * Dynamically resolves the latest active Gemini Flash model for the API key.
+ * Queries GET /v1beta/models, filters for generateContent-compatible Flash models,
+ * and falls back to our prioritized cascade if dynamic lookup is unavailable.
+ */
+export async function getActiveFlashModel(apiKey, forceRefresh = false) {
+  if (cachedFlashModel && !forceRefresh) {
+    return cachedFlashModel;
+  }
+
+  if (apiKey) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (res.ok) {
+        const data = await res.json();
+        const models = data.models || [];
+        const standardFlash = models
+          .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+          .map((m) => m.name.replace(/^models\//, ''))
+          .map((name) => {
+            const match = name.match(/^gemini-(\d+(?:\.\d+)?)-flash$/i);
+            return match ? { name, version: parseFloat(match[1]) } : null;
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.version - a.version);
+
+        if (standardFlash.length > 0) {
+          cachedFlashModel = standardFlash[0].name;
+          try {
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('fleet_pulse_gemini_model', cachedFlashModel);
+            }
+          } catch (_) {}
+          return cachedFlashModel;
+        }
+
+        // Fallback to any model with 'flash' and generateContent
+        const anyFlash = models
+          .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && /flash/i.test(m.name))
+          .map((m) => m.name.replace(/^models\//, ''));
+
+        if (anyFlash.length > 0) {
+          cachedFlashModel = anyFlash.includes('gemini-flash-latest') ? 'gemini-flash-latest' : anyFlash[0];
+          try {
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('fleet_pulse_gemini_model', cachedFlashModel);
+            }
+          } catch (_) {}
+          return cachedFlashModel;
+        }
+      }
+    } catch (err) {
+      console.warn('Dynamic model discovery failed, using fallback list:', err);
+    }
+  }
+
+  cachedFlashModel = FALLBACK_FLASH_MODELS[0];
+  return cachedFlashModel;
+}
+
+/**
+ * Sends a generateContent request with dynamic model discovery and automatic fallback retry.
+ */
+async function sendGeminiGenerateContent(apiKey, body) {
+  let model = await getActiveFlashModel(apiKey);
+  let url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  let response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  // If 404 (model deprecated / not found), attempt dynamic re-discovery first
+  if (response.status === 404) {
+    console.warn(`Gemini model '${model}' returned 404. Attempting dynamic model re-discovery...`);
+    const refreshed = await getActiveFlashModel(apiKey, true);
+    if (refreshed && refreshed !== model) {
+      model = refreshed;
+      url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+  }
+
+  // If still not ok and status indicates model unviable / overloaded (404, 503, or 429), step through fallback cascade
+  if (!response.ok && (response.status === 404 || response.status === 503 || response.status === 429)) {
+    console.warn(`Model '${model}' returned ${response.status}. Stepping through fallback cascade...`);
+    for (const candidate of FALLBACK_FLASH_MODELS) {
+      if (candidate !== model) {
+        url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${apiKey}`;
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (response.ok) {
+          cachedFlashModel = candidate;
+          try {
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('fleet_pulse_gemini_model', candidate);
+            }
+          } catch (_) {}
+          break;
+        }
+      }
+    }
+  }
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error(`Gemini API error (${response.status}):`, errText);
+    throw new Error(`Gemini API request failed (${response.status})`);
+  }
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('No response from Gemini');
+  return text.trim();
+}
+
 /**
  * Call the Gemini API with an image and a text prompt.
  * Returns the text response.
@@ -32,8 +168,6 @@ async function fileToBase64(file) {
 async function callGemini(apiKey, imageFile, prompt) {
   const base64Data = await fileToBase64(imageFile);
   const mimeType = imageFile.type || 'image/jpeg';
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
   const body = {
     contents: [
@@ -57,21 +191,7 @@ async function callGemini(apiKey, imageFile, prompt) {
     },
   };
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${err}`);
-  }
-
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('No response from Gemini');
-  return text.trim();
+  return sendGeminiGenerateContent(apiKey, body);
 }
 
 /**
@@ -82,13 +202,39 @@ async function callGemini(apiKey, imageFile, prompt) {
  * confidence is 'high', 'medium', or 'low'.
  * If the image is not an odometer, mileage will be null.
  */
-export async function readOdometer(apiKey, imageFile) {
-  const prompt = `You are analyzing a photograph of a vehicle dashboard odometer.
+export async function readOdometer(apiKey, imageFile, options = {}) {
+  const isHours = Boolean(options.isHours || options.type === 'reefer');
+
+  const prompt = isHours
+    ? `You are analyzing a photograph of a refrigerated trailer (reefer) unit display (such as Thermo King or Carrier Transicold) or an engine hour meter.
+
+Your task:
+1. Identify if this image displays an hour meter or engine run hours.
+2. If yes, extract the engine run hours (or total unit hours) as an integer.
+3. If this display only shows cargo temperatures/setpoints (e.g. 45°F, Setpoint 36°F on a Thermo King or Carrier default screen) and not the Hourmeters/Gauges menu, note that engine hours are not visible.
+4. Assess your confidence in the reading.
+
+Respond in EXACTLY this JSON format, nothing else:
+{
+  "is_odometer": true/false,
+  "mileage": <number or null>,
+  "confidence": "high" | "medium" | "low",
+  "notes": "<brief explanation>"
+}
+
+Rules:
+- If this does NOT display an engine hour meter, set is_odometer to false and mileage to null.
+- If the screen only shows temperature (e.g., box temp or setpoint), set is_odometer to false, mileage to null, and explain in notes: "Screen displays box temperature instead of engine hours. Please navigate to the Hourmeters / Gauges menu."
+- Ignore tenths of an hour if present (the decimal digit after the dot).
+- Read total engine run hours or unit hours as an integer.
+- Do not guess. If you cannot read the number, set mileage to null and explain in notes.`
+    : `You are analyzing a photograph of a vehicle dashboard odometer or commercial truck instrument cluster.
 
 Your task:
 1. Identify if there is an odometer display in this image.
-2. If yes, read the mileage number shown.
-3. Assess your confidence in the reading.
+2. If yes, read the total cumulative mileage number shown (commercial trucks can display up to 7 digits, up to 9,999,999 miles).
+3. Distinguish total odometer mileage from any trip meter shown (trip meters often show a decimal point like .1 or 'mi' / 'trip' label).
+4. Assess your confidence in the reading.
 
 Respond in EXACTLY this JSON format, nothing else:
 {
@@ -100,8 +246,9 @@ Respond in EXACTLY this JSON format, nothing else:
 
 Rules:
 - If this is NOT an odometer image, set is_odometer to false and mileage to null.
-- Read only the odometer (total mileage), not the trip meter.
-- Ignore tenths digits if present (the small digit at the end).
+- Read only the total vehicle odometer mileage, NOT the trip meter.
+- Ignore tenths digits if present (e.g. decimal point followed by a tenth of a mile).
+- Commercial truck odometers often have 6 or 7 digits (e.g. 1,202,424). Read the full total integer.
 - If the image is blurry, at a bad angle, or partially obstructed, set confidence to "low" or "medium".
 - Do not guess. If you cannot read the number, set mileage to null and explain in notes.`;
 
@@ -177,12 +324,7 @@ Rules:
 /**
  * Call the Gemini API with a text-only prompt (no image).
  */
-/**
- * Call the Gemini API with a text-only prompt (no image).
- */
 async function callGeminiText(apiKey, prompt, systemInstruction = null) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
   const body = {
     contents: [
       {
@@ -201,21 +343,7 @@ async function callGeminiText(apiKey, prompt, systemInstruction = null) {
     };
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini API error (${response.status}): ${err}`);
-  }
-
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('No response from Gemini');
-  return text.trim();
+  return sendGeminiGenerateContent(apiKey, body);
 }
 
 /**
@@ -488,13 +616,17 @@ STRICT SCOPE CONSTRAINTS:
 }
 
 /**
- * Check if the Gemini API key is valid by making a minimal request.
+ * Check if the Gemini API key is valid by making a minimal request
+ * and discovering the latest active Flash model.
  */
 export async function testApiKey(apiKey) {
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
     const response = await fetch(url);
-    return response.ok;
+    if (!response.ok) return false;
+    // Prime the active model cache
+    await getActiveFlashModel(apiKey, true);
+    return true;
   } catch {
     return false;
   }
