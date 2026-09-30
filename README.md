@@ -47,6 +47,9 @@ Point your phone at a dusty dashboard odometer. AI reads it, assigns a confidenc
 ### Offline-First IndexedDB
 100% client-side. No login, no cloud sync, no server. Data lives in your browser's IndexedDB. Export a full JSON backup from Settings anytime
 
+### Smart Duplicate Prevention
+Catches same-day identical service entries with fuzzy normalization (e.g. "Oil & Filter" vs "Oil and Filter"). Warns user with option to update existing record, while allowing legitimate multi-service shop visits (Oil + Lube + Air Cleaner) on the same date
+
 </td>
 <td width="50%">
 
@@ -81,7 +84,7 @@ Open [localhost:5173](http://localhost:5173). The landing page has an animated s
 - **Try the demo** → Interactive sample fleet with pre-built scenarios
 
 ```bash
-npm test          # 109 tests — guardrails, security, status logic, data integrity, demo isolation
+npm test          # 162 automated tests across 8 test suites (CRUD, guardrails, duplicate warnings)
 npm run build     # Production bundle (~56 kB gzipped)
 ```
 
@@ -118,12 +121,39 @@ This project was built for the [Next Chapter](https://github.com/ZynzTehr) Phase
 
 - **Never auto-save.** AI outputs land in a review panel. The user must explicitly accept.
 - **Mileage regression warning.** If a new reading is lower than the current one, a confirmation dialog explains this usually indicates an error (or an odometer rollover).
+- **Service duplicate collision warning.** If a service record with the same normalized type and date already exists for that unit, the user is warned and given the option to update the existing record or save a separate entry.
+- **Unit uniqueness enforcement.** Unit numbers enforce strict uniqueness at both the UI and database index levels.
 - **Global warnings.** If any guardrail fires, a yellow banner warns the user before they can accept the data.
 - **Failure mode acknowledged.** The central risk is a user accepting an incorrect interval and delaying necessary maintenance. The README, tutorial, and Settings page all say: *confirm against your equipment's documentation and operating conditions.*
+
+### Test Suite Breakdown (162 Passing Tests)
+
+| Test Suite | Tests | Scope |
+|:---|:---:|:---|
+| [`tests/crud-operations.test.js`](tests/crud-operations.test.js) | 38 | Full CRUD across equipment, maintenance schedules, service records, and settings; backup export/import |
+| [`tests/security.test.js`](tests/security.test.js) | 33 | XSS sanitization, prompt injection defenses, mileage rollover edge cases, and boundary constraints |
+| [`tests/ai-guardrails.test.js`](tests/ai-guardrails.test.js) | 25 | Sanity bounds, interval monotonicity (PM-A < PM-B < PM-C), OCR fallback thresholds |
+| [`tests/maintenance-status.test.js`](tests/maintenance-status.test.js) | 22 | Dual-trigger status calculation, 1M+ mile diesel rollover handling, threshold boundaries |
+| [`tests/service-duplicate-warning.test.js`](tests/service-duplicate-warning.test.js) | 14 | Same-day duplicate collision detection, fuzzy name normalization, multi-service visit co-existence |
+| [`tests/data-integrity.test.js`](tests/data-integrity.test.js) | 10 | Schema validation, malformed JSON recovery, non-object import rejection |
+| [`tests/demo-workboard.test.js`](tests/demo-workboard.test.js) | 10 | Demo mode isolation, distinct database namespace separation, mock data generation |
+| [`tests/gears.test.js`](tests/gears.test.js) | 10 | Kinematic gear meshing ratios, scroll synchronization, visual theme integrity |
+| **Total** | **162** | **100% Passing with zero regressions** |
 
 ---
 
 ## Architecture
+
+The JavaScript codebase is organized into five semantic subdirectories under `src/js/`:
+
+```
+src/js/
+├── components/   # UI widgets & canvas visuals (dashboard cards, gears, icons, pixel ripple, tutorial)
+├── data/         # Storage layer, demo mock data, and maintenance schedule templates
+├── pages/        # Application entry points and page orchestrators (landing page & dashboard SPA)
+├── services/     # Domain business logic and API integrations (Gemini AI & fleet status engine)
+└── utils/        # Shared helper functions (app mode detection, sanitization, duplicate detection)
+```
 
 | File | Responsibility |
 |------|----------------|
