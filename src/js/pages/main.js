@@ -577,12 +577,26 @@ function renderEquipmentDetail(container, eqId) {
   container.querySelector('#btn-edit-eq').addEventListener('click', () => showEditEquipmentModal(eq));
 
   // Delete button
-  container.querySelector('#btn-delete-eq').addEventListener('click', async () => {
-    if (confirm(`Delete Unit ${eq.unitNumber} and all its maintenance data and records? This cannot be undone.`)) {
-      await db.deleteEquipment(eqId);
-      showToast(`Unit ${eq.unitNumber} deleted`, 'info');
-      navigate('equipment');
-    }
+  container.querySelector('#btn-delete-eq').addEventListener('click', () => {
+    const deleteBody = `
+      <div class="alert-item alert-item-red mb-md">
+        ${icons.alertTriangle} <strong>This action cannot be undone.</strong>
+      </div>
+      <p class="text-secondary mb-md">Permanently delete <strong>Unit ${escapeHtml(eq.unitNumber)}</strong> and all associated maintenance schedules and service records?</p>
+    `;
+    const deleteFooter = `
+      <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+      <button class="btn btn-danger" id="modal-confirm-delete">${icons.trash} Delete Unit</button>
+    `;
+    showModal('Delete Equipment', deleteBody, deleteFooter, (overlay, close) => {
+      overlay.querySelector('#modal-cancel').addEventListener('click', close);
+      overlay.querySelector('#modal-confirm-delete').addEventListener('click', async () => {
+        await db.deleteEquipment(eqId);
+        showToast(`Unit ${eq.unitNumber} deleted`, 'info');
+        close();
+        navigate('equipment');
+      });
+    });
   });
 
   // Log service buttons
@@ -999,20 +1013,42 @@ function renderOdometerPage(container) {
 
     const meterField = eq.type === 'reefer' ? 'currentHours' : 'currentMileage';
     const currentReading = eq[meterField];
-    // A lower reading needs explicit review for a correction or rollover.
-    if (currentReading && mileage < currentReading) {
-      if (!confirm(`Warning: New reading (${formatMileage(mileage)}) is lower than current (${formatMileage(currentReading)}). This usually means an error. Save anyway?`)) {
-        return;
-      }
+    const unit = eq.type === 'reefer' ? 'hrs' : 'mi';
+
+    async function commitMileage() {
+      await db.updateEquipment(eqId, {
+        [meterField]: mileage,
+        mileageUpdatedAt: new Date().toISOString(),
+      });
+      showToast(`Unit ${eq.unitNumber} updated to ${formatMileage(mileage)} ${unit}`, 'success');
+      renderPage();
     }
 
-    await db.updateEquipment(eqId, {
-      [meterField]: mileage,
-      mileageUpdatedAt: new Date().toISOString(),
-    });
+    // A lower reading needs explicit review for a correction or rollover.
+    if (currentReading && mileage < currentReading) {
+      const warnBody = `
+        <div class="alert-item alert-item-yellow mb-md">
+          ${icons.alertTriangle} <strong>Reading is lower than current value</strong>
+        </div>
+        <p class="text-secondary mb-sm">New reading: <strong>${formatMileage(mileage)} ${unit}</strong></p>
+        <p class="text-secondary mb-md">Current reading: <strong>${formatMileage(currentReading)} ${unit}</strong></p>
+        <p class="text-secondary text-sm">This usually means an entry error. If this is a correction or odometer rollover, you can save anyway.</p>
+      `;
+      showModal('Confirm Reading', warnBody,
+        `<button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+         <button class="btn btn-primary" id="modal-confirm">Save Anyway</button>`,
+        (overlay, close) => {
+          overlay.querySelector('#modal-cancel').addEventListener('click', close);
+          overlay.querySelector('#modal-confirm').addEventListener('click', async () => {
+            close();
+            await commitMileage();
+          });
+        }
+      );
+      return;
+    }
 
-    showToast(`Unit ${eq.unitNumber} updated to ${formatMileage(mileage)} ${eq.type === 'reefer' ? 'hrs' : 'mi'}`, 'success');
-    renderPage();
+    await commitMileage();
   });
 }
 
@@ -1215,11 +1251,26 @@ function renderSettingsPage(container) {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (confirm('This will replace ALL current data with the backup. Continue?')) {
-        await db.importAllData(data);
-        showToast('Backup restored', 'success');
-        renderPage();
-      }
+      const importBody = `
+        <div class="alert-item alert-item-yellow mb-md">
+          ${icons.alertTriangle} <strong>This will replace all current data</strong>
+        </div>
+        <p class="text-secondary mb-md">Restoring from <strong>${escapeHtml(file.name)}</strong> will overwrite all existing equipment, maintenance schedules, and service records.</p>
+        <p class="text-secondary text-sm">Export a backup first if you want to keep your current data.</p>
+      `;
+      showModal('Restore Backup', importBody,
+        `<button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+         <button class="btn btn-danger" id="modal-confirm-import">${icons.upload || ''} Replace All Data</button>`,
+        (overlay, close) => {
+          overlay.querySelector('#modal-cancel').addEventListener('click', close);
+          overlay.querySelector('#modal-confirm-import').addEventListener('click', async () => {
+            close();
+            await db.importAllData(data);
+            showToast('Backup restored', 'success');
+            renderPage();
+          });
+        }
+      );
     } catch (err) {
       showToast(`Import failed: ${err.message}`, 'error');
     }
@@ -1303,6 +1354,32 @@ function showModal(title, bodyHTML, footerHTML, onMount) {
 
   if (onMount) onMount(overlay, close);
   return { overlay, close };
+}
+
+/** Update make/model/engine placeholders and disabled state based on equipment type. */
+function applyTypePlaceholders(overlay, type) {
+  const makeInput = overlay.querySelector('#eq-make');
+  const modelInput = overlay.querySelector('#eq-model');
+  const engineInput = overlay.querySelector('#eq-engine');
+  if (!makeInput || !modelInput || !engineInput) return;
+
+  if (type === 'reefer') {
+    makeInput.placeholder = 'e.g. Great Dane';
+    modelInput.placeholder = 'e.g. 53ft Tandem';
+    engineInput.placeholder = 'e.g. Thermo King';
+    engineInput.disabled = false;
+  } else if (type === 'trailer') {
+    makeInput.placeholder = 'e.g. Utility';
+    modelInput.placeholder = 'e.g. 48ft Spread Axle Flatbed';
+    engineInput.placeholder = 'N/A — no engine';
+    engineInput.disabled = true;
+    engineInput.value = '';
+  } else {
+    makeInput.placeholder = 'e.g. Freightliner';
+    modelInput.placeholder = 'e.g. Cascadia';
+    engineInput.placeholder = 'e.g. 12.8L Detroit';
+    engineInput.disabled = false;
+  }
 }
 
 function showAddEquipmentModal() {
@@ -1410,12 +1487,15 @@ function showAddEquipmentModal() {
     });
 
     const typeSelect = overlay.querySelector('#eq-type');
+    // Apply initial placeholders for default type
+    applyTypePlaceholders(overlay, typeSelect.value);
     typeSelect.addEventListener('change', () => {
       const field = overlay.querySelector('#eq-mileage');
       field.value = '';
       field.disabled = typeSelect.value === 'trailer';
       field.placeholder = typeSelect.value === 'reefer' ? 'e.g. 8420' : typeSelect.value === 'trailer' ? 'Tracked by service date' : 'e.g. 234567';
       overlay.querySelector('label[for="eq-mileage"]').textContent = typeSelect.value === 'reefer' ? 'Current engine hours' : 'Current mileage';
+      applyTypePlaceholders(overlay, typeSelect.value);
     });
     // Cancel
     overlay.querySelector('#modal-cancel').addEventListener('click', close);
@@ -1527,6 +1607,13 @@ function showEditEquipmentModal(eq) {
   showModal(`Edit Unit ${eq.unitNumber}`, body, footer, (overlay, close) => {
     const photoFile = overlay.querySelector('#eq-photo-file');
     const photoZone = overlay.querySelector('#eq-photo-zone');
+
+    // Apply type-appropriate placeholders and engine disabled state
+    applyTypePlaceholders(overlay, eq.type);
+    const editTypeSelect = overlay.querySelector('#eq-type');
+    editTypeSelect.addEventListener('change', () => {
+      applyTypePlaceholders(overlay, editTypeSelect.value);
+    });
 
     async function handleEditPhoto(e) {
       const file = e.target.files[0];
@@ -2290,42 +2377,53 @@ function showAILookupModal(eq) {
         return;
       }
 
-      const action = confirm(
-        `This will REPLACE the current ${allMaintenance.filter(m => m.equipmentId === eq.id).length} maintenance items ` +
-        `with ${selectedIdxs.length} AI-suggested items for Unit ${eq.unitNumber}.\n\n` +
-        `You reviewed the intervals, sources, and warnings. Continue?`
+      const existingCount = allMaintenance.filter(m => m.equipmentId === eq.id).length;
+      const replaceBody = `
+        <div class="alert-item alert-item-yellow mb-md">
+          ${icons.alertTriangle} <strong>This will replace existing maintenance items</strong>
+        </div>
+        <p class="text-secondary mb-md">Replace the current <strong>${existingCount} maintenance items</strong> with <strong>${selectedIdxs.length} AI-suggested items</strong> for Unit ${escapeHtml(eq.unitNumber)}?</p>
+        <p class="text-secondary text-sm">You reviewed the intervals, sources, and warnings. This cannot be undone.</p>
+      `;
+      showModal('Apply AI Intervals', replaceBody,
+        `<button class="btn btn-ghost" id="modal-cancel-ai">Cancel</button>
+         <button class="btn btn-primary" id="modal-confirm-ai">Apply ${selectedIdxs.length} Items</button>`,
+        (innerOverlay, innerClose) => {
+          innerOverlay.querySelector('#modal-cancel-ai').addEventListener('click', innerClose);
+          innerOverlay.querySelector('#modal-confirm-ai').addEventListener('click', async () => {
+            innerClose();
+
+            // Delete existing maintenance items for this equipment
+            const existing = allMaintenance.filter((m) => m.equipmentId === eq.id);
+            for (const m of existing) {
+              await db.deleteMaintenance(m.id);
+            }
+
+            // Add selected AI items
+            for (const idx of selectedIdxs) {
+              const item = result.items[idx];
+              await db.addMaintenance({
+                equipmentId: eq.id,
+                name: item.name,
+                category: item.category,
+                mileageInterval: item.mileageInterval,
+                timeInterval: item.timeInterval,
+                description: item.description,
+                source: item.source,
+                sourceDetail: item.sourceDetail,
+                confidence: item.confidence,
+                enabled: true,
+                lastServiceMileage: null,
+                lastServiceDate: null,
+              });
+            }
+
+            showToast(`${selectedIdxs.length} AI-suggested intervals applied to Unit ${eq.unitNumber}`, 'success');
+            close();
+            renderPage();
+          });
+        }
       );
-
-      if (!action) return;
-
-      // Delete existing maintenance items for this equipment
-      const existing = allMaintenance.filter((m) => m.equipmentId === eq.id);
-      for (const m of existing) {
-        await db.deleteMaintenance(m.id);
-      }
-
-      // Add selected AI items
-      for (const idx of selectedIdxs) {
-        const item = result.items[idx];
-        await db.addMaintenance({
-          equipmentId: eq.id,
-          name: item.name,
-          category: item.category,
-          mileageInterval: item.mileageInterval,
-          timeInterval: item.timeInterval,
-          description: item.description,
-          source: item.source,
-          sourceDetail: item.sourceDetail,
-          confidence: item.confidence,
-          enabled: true,
-          lastServiceMileage: null,
-          lastServiceDate: null,
-        });
-      }
-
-      showToast(`${selectedIdxs.length} AI-suggested intervals applied to Unit ${eq.unitNumber}`, 'success');
-      close();
-      renderPage();
     });
   });
 }
