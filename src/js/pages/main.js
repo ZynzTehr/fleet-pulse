@@ -1159,16 +1159,51 @@ function renderSettingsPage(container) {
   });
 
   // Export
-  container.querySelector('#btn-export').addEventListener('click', async () => {
-    const data = await db.exportAllData();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fleet-pulse-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('Backup exported', 'success');
+  container.querySelector('#btn-export').addEventListener('click', () => {
+    const hasKey = !!appSettings.geminiApiKey;
+    showModal(
+      'Export Backup',
+      `<p class="text-secondary mb-md">Download a JSON backup of <strong>all equipment, maintenance schedules, and service records</strong>.</p>
+       <div class="alert-item alert-item-yellow mb-md">
+         ${icons.alertTriangle}
+         <span>The backup file is <strong>not encrypted</strong>. Anyone with access to this file can read your fleet data.</span>
+       </div>${hasKey ? `
+       <label class="cyber-check">
+         <input type="checkbox" id="chk-include-key" />
+         <span class="cyber-check__track"></span>
+         <span class="cyber-check__label">Include my <strong>Gemini API key</strong> in the backup</span>
+       </label>` : ''}`,
+      `<button class="btn btn-secondary" id="modal-cancel-export">Cancel</button>
+       <button class="btn btn-primary" id="modal-confirm-export">${icons.download} Export Backup</button>`,
+      (overlay, close) => {
+        overlay.querySelector('#modal-cancel-export').addEventListener('click', close);
+        overlay.querySelector('#modal-confirm-export').addEventListener('click', async () => {
+          const includeKey = overlay.querySelector('#chk-include-key')?.checked ?? false;
+          const data = await db.exportAllData();
+
+          // Strip API key from settings unless user opted in
+          if (!includeKey && data.settings) {
+            data.settings = data.settings.map(s => {
+              if (s.geminiApiKey) {
+                const { geminiApiKey, ...rest } = s;
+                return rest;
+              }
+              return s;
+            });
+          }
+
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `fleet-pulse-backup-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          close();
+          showToast('Backup exported' + (includeKey ? ' (includes API key)' : ''), 'success');
+        });
+      }
+    );
   });
 
   // Import
@@ -1192,18 +1227,32 @@ function renderSettingsPage(container) {
 
   // Clear all
   container.querySelector('#btn-clear-all').addEventListener('click', () => {
+    const hasKey = !!appSettings.geminiApiKey;
     showModal(
       'Delete All Data',
       `<p class="text-secondary mb-md">This will permanently delete <strong>all equipment, maintenance schedules, and service records</strong> from Fleet Pulse.</p>
-       <p class="text-red text-sm">This action cannot be undone. Export a backup first if needed.</p>`,
+       <p class="text-red text-sm"${hasKey ? ' style="margin-bottom:1rem;"' : ''}>This action cannot be undone. Export a backup first if needed.</p>${hasKey ? `
+       <label class="cyber-check">
+         <input type="checkbox" id="chk-clear-key" />
+         <span class="cyber-check__track"></span>
+         <span class="cyber-check__label">Also delete my <strong>Gemini API key</strong></span>
+       </label>` : ''}`,
       `<button class="btn btn-secondary" id="modal-cancel-clear">Cancel</button>
        <button class="btn btn-danger" id="modal-confirm-clear">${icons.trash} Delete Everything</button>`,
       (overlay, close) => {
         overlay.querySelector('#modal-cancel-clear').addEventListener('click', close);
         overlay.querySelector('#modal-confirm-clear').addEventListener('click', async () => {
-          await db.importAllData({ version: 1, equipment: [], maintenance: [], records: [], settings: [] });
+          const alsoDeleteKey = overlay.querySelector('#chk-clear-key')?.checked ?? false;
+          if (alsoDeleteKey) {
+            await db.importAllData({ version: 1, equipment: [], maintenance: [], records: [], settings: [] });
+            appSettings.geminiApiKey = '';
+          } else {
+            const currentSettings = await db.getSettings();
+            await db.importAllData({ version: 1, equipment: [], maintenance: [], records: [], settings: [] });
+            await db.saveSettings(currentSettings);
+          }
           close();
-          showToast('All data cleared', 'info');
+          showToast('All data cleared' + (alsoDeleteKey ? ' (including API key)' : ''), 'info');
           renderPage();
         });
       }

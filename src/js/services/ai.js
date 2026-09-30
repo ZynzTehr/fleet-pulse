@@ -43,7 +43,10 @@ let cachedFlashModel = typeof localStorage !== 'undefined'
  * and falls back to our prioritized cascade if dynamic lookup is unavailable.
  */
 export async function getActiveFlashModel(apiKey, forceRefresh = false) {
+  console.time('⏱ Model Discovery');
   if (cachedFlashModel && !forceRefresh) {
+    console.timeEnd('⏱ Model Discovery');
+    console.log(`  ↳ Using cached model: ${cachedFlashModel}`);
     return cachedFlashModel;
   }
 
@@ -94,6 +97,8 @@ export async function getActiveFlashModel(apiKey, forceRefresh = false) {
   }
 
   cachedFlashModel = FALLBACK_FLASH_MODELS[0];
+  console.timeEnd('⏱ Model Discovery');
+  console.log(`  ↳ Fell back to default: ${cachedFlashModel}`);
   return cachedFlashModel;
 }
 
@@ -101,14 +106,17 @@ export async function getActiveFlashModel(apiKey, forceRefresh = false) {
  * Sends a generateContent request with dynamic model discovery and automatic fallback retry.
  */
 async function sendGeminiGenerateContent(apiKey, body) {
+  console.time('⏱ Total API Call');
   let model = await getActiveFlashModel(apiKey);
   let url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
+  console.time(`⏱ Gemini Request (${model})`);
   let response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  console.timeEnd(`⏱ Gemini Request (${model})`);
 
   // If 404 (model deprecated / not found), attempt dynamic re-discovery first
   if (response.status === 404) {
@@ -117,11 +125,13 @@ async function sendGeminiGenerateContent(apiKey, body) {
     if (refreshed && refreshed !== model) {
       model = refreshed;
       url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      console.time(`⏱ Retry Request (${model})`);
       response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      console.timeEnd(`⏱ Retry Request (${model})`);
     }
   }
 
@@ -131,12 +141,15 @@ async function sendGeminiGenerateContent(apiKey, body) {
     for (const candidate of FALLBACK_FLASH_MODELS) {
       if (candidate !== model) {
         url = `https://generativelanguage.googleapis.com/v1beta/models/${candidate}:generateContent?key=${apiKey}`;
+        console.time(`⏱ Fallback Try (${candidate})`);
         response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
+        console.timeEnd(`⏱ Fallback Try (${candidate})`);
         if (response.ok) {
+          console.log(`  ↳ Fallback success: ${candidate}`);
           cachedFlashModel = candidate;
           try {
             if (typeof localStorage !== 'undefined') {
@@ -158,6 +171,7 @@ async function sendGeminiGenerateContent(apiKey, body) {
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('No response from Gemini');
+  console.timeEnd('⏱ Total API Call');
   return text.trim();
 }
 
@@ -166,7 +180,9 @@ async function sendGeminiGenerateContent(apiKey, body) {
  * Returns the text response.
  */
 async function callGemini(apiKey, imageFile, prompt) {
+  console.time('⏱ Image → Base64');
   const base64Data = await fileToBase64(imageFile);
+  console.timeEnd('⏱ Image → Base64');
   const mimeType = imageFile.type || 'image/jpeg';
 
   const body = {
