@@ -6,9 +6,9 @@
  */
 
 export const EQUIPMENT_TYPES = [
-  { value: 'tractor', label: 'Tractor (Semi Truck)' },
+  { value: 'tractor', label: 'Tractor' },
   { value: 'trailer', label: 'Trailer' },
-  { value: 'reefer', label: 'Reefer Unit' },
+  { value: 'reefer', label: 'Reefer Trailer' },
 ];
 
 /**

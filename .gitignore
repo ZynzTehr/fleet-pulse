@@ -27,3 +27,17 @@ dist-ssr
 rubric.md
 prompt-log.md
 myAgent/
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/
+playwright/
+.playwright/
+
+# AI and editor configurations
+[Gg][Ee][Mm][Ii][Nn][Ii].[Mm][Dd]
+[Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd]
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+.agents/
+.cursor/
+.github/

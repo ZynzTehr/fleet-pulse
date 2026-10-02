@@ -1,8 +1,9 @@
+import { sumCosts } from '../services/fuel.js';
 import { icons } from './icons.js';
-import { escapeHtml, getStalenessLabel, getStalenessClass, daysSince } from '../utils/utils.js';
+import { escapeHtml, getStalenessLabel, getStalenessClass, daysSince, formatCurrency } from '../utils/utils.js';
 import { equipmentReading, equipmentStatus, serviceStatus } from '../services/fleetStatus.js';
 
-export function renderWorkboard(container, { equipment, maintenance, records, demo, navigate, logService, addEquipment, setupSchedule }) {
+export function renderWorkboard(container, { equipment, maintenance, records, fuel, permits, insurance = [], demo, navigate, logService, addEquipment, setupSchedule }) {
   const items = equipment.flatMap((eq) => maintenance.filter((m) => m.equipmentId === eq.id && m.enabled)
     .map((m) => ({ eq, m, ...serviceStatus(m, eq) })));
   const overdue = items.filter((item) => item.status === 'overdue');
@@ -10,6 +11,11 @@ export function renderWorkboard(container, { equipment, maintenance, records, de
   const needsHistory = items.filter((item) => item.status === 'unknown');
   const noSchedule = equipment.filter((eq) => !maintenance.some((m) => m.equipmentId === eq.id && m.enabled));
   const stale = equipment.filter((eq) => eq.type !== 'trailer' && daysSince(eq.mileageUpdatedAt) > 14);
+  const serviceSpend = sumCosts(records, 'cost');
+  const fuelSpend = sumCosts(fuel || [], 'totalCost');
+  const permitSpend = sumCosts(permits || [], 'cost');
+  const insuranceSpend = sumCosts(insurance || [], 'premium');
+  const totalSpend = serviceSpend + fuelSpend + permitSpend + insuranceSpend;
   const attention = [...overdue, ...dueSoon, ...needsHistory];
   const hasAttention = attention.length || noSchedule.length || stale.length;
   container.innerHTML = `
@@ -23,15 +29,20 @@ export function renderWorkboard(container, { equipment, maintenance, records, de
     <div class="page-body workboard">
       ${demo ? `<section class="demo-guide" aria-labelledby="demo-guide-title">
         <div><span class="section-eyebrow">A working fleet, ready to explore</span><h3 id="demo-guide-title">Try a day in the shop.</h3>
-        <p>Log Unit 101’s overdue oil change, update Unit 104’s reading, or open the trailer’s service history.</p></div>
+        <p>Log Unit 101's overdue oil change, update Unit 104's reading, or open the trailer's service history.</p></div>
         <div class="demo-task-links"><button data-demo-task="service">01 &nbsp; Log a service ${icons.arrowRight || '→'}</button><button data-demo-task="reading">02 &nbsp; Update a reading →</button><button data-demo-task="history">03 &nbsp; Explore a unit →</button></div>
       </section>` : ''}
       <dl class="fleet-summary" aria-label="Fleet summary">
         <div><dt>Units</dt><dd>${equipment.length}</dd></div>
         <div><dt>Overdue services</dt><dd class="${overdue.length ? 'text-red' : ''}">${overdue.length}</dd></div>
         <div><dt>Due soon</dt><dd class="${dueSoon.length ? 'text-yellow' : ''}">${dueSoon.length}</dd></div>
-        <div><dt>Service records</dt><dd>${records.length}</dd></div>
+        <div><dt>Service spend</dt><dd>${serviceSpend > 0 ? formatCurrency(serviceSpend) : '$0'}</dd></div>
+        <div><dt>Fuel spend</dt><dd>${fuelSpend > 0 ? formatCurrency(fuelSpend) : '$0'}</dd></div>
+        <div><dt>Total spend</dt><dd>${totalSpend > 0 ? formatCurrency(totalSpend) : '$0'}</dd></div>
+        <div><dt>Insurance spend</dt><dd>${insuranceSpend > 0 ? formatCurrency(insuranceSpend) : '$0'}</dd></div>
+        <div><dt>Permit spend</dt><dd>${permitSpend > 0 ? formatCurrency(permitSpend) : '$0'}</dd></div>
       </dl>
+      <p class="text-xs text-secondary mb-md">All recorded spending across service, fuel, permits, and commercial insurance policies.</p>
       ${equipment.length ? `<section class="workboard-section" aria-labelledby="attention-title">
         <div class="section-heading"><div><span class="section-eyebrow">Service & follow-up</span><h3 id="attention-title">Needs attention</h3></div><span class="text-sm text-secondary">${hasAttention ? 'Overdue services first' : 'Nothing due right now'}</span></div>
         <div class="attention-list">

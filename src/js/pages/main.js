@@ -11,9 +11,15 @@ import * as db from '../data/db.js';
 import { EQUIPMENT_TYPES, getDefaultMaintenanceItems } from '../data/templates.js';
 import { readOdometer, readServiceRecord, testApiKey, lookupMaintenanceIntervals } from '../services/ai.js';
 import { isDemoMode } from '../utils/appMode.js';
+import { fuelLines } from '../services/fuel.js';
+import { initAutoTextareas, resizeTextareas } from '../utils/autoTextarea.js';
+import { renderFuelPage as renderFuel, renderUnitCosts } from '../components/fuel.js';
+import { renderPermitsPage, renderEquipmentPermitsSection, showPermitModal } from '../components/permits.js';
+import { renderInsurancePage, renderEquipmentInsuranceSection, showInsuranceModal } from '../components/insurance.js';
 import { renderWorkboard } from '../components/dashboard.js';
 import { equipmentReading, serviceStatus } from '../services/fleetStatus.js';
 import { openTutorial } from '../components/tutorial.js';
+import { encryptBackup, decryptBackup, isEncryptedBackup } from '../services/crypto.js';
 import {
   renderGearsStageHTML,
   initGearsScroll,
@@ -76,6 +82,9 @@ let currentPage = 'dashboard';
 let allEquipment = [];
 let allMaintenance = [];
 let allRecords = [];
+let allFuel = [];
+let allPermits = [];
+let allInsurance = [];
 let appSettings = {};
 const demoMode = isDemoMode();
 let tutorialTimer;
@@ -108,10 +117,13 @@ window.addEventListener('hashchange', () => {
 // ─── Data Loading ─────────────────────────────────────────────
 
 async function loadAllData() {
-  [allEquipment, allMaintenance, allRecords, appSettings] = await Promise.all([
+  [allEquipment, allMaintenance, allRecords, allFuel, allPermits, allInsurance, appSettings] = await Promise.all([
     db.getAllEquipment(),
     db.getAllMaintenance(),
     db.getAllRecords(),
+    db.getAllFuel(),
+    db.getAllPermits(),
+    db.getAllInsurance(),
     db.getSettings(),
   ]);
 }
@@ -155,6 +167,18 @@ function renderShell() {
         <button class="nav-item" data-page="records">
           ${icons.fileText}
           <span>Service Records</span>
+        </button>
+        <button class="nav-item" data-page="fuel">
+          ${icons.fuel}
+          <span>Fuel</span>
+        </button>
+        <button class="nav-item" data-page="permits">
+          ${icons.permit}
+          <span>Permits</span>
+        </button>
+        <button class="nav-item" data-page="insurance">
+          ${icons.shield}
+          <span>Insurance</span>
         </button>
         <div class="nav-section-label">Tools</div>
         <button class="nav-item" data-page="odometer">
@@ -280,6 +304,15 @@ async function renderPage() {
     case 'records':
       renderRecordsPage(main);
       break;
+    case 'fuel':
+      renderFuel(main, { equipment: allEquipment, fuel: allFuel, settings: appSettings, showModal, refresh: renderPage, navigate });
+      break;
+    case 'permits':
+      renderPermitsPage(main, { equipment: allEquipment, permits: allPermits, settings: appSettings, showModal, refresh: renderPage, navigate });
+      break;
+    case 'insurance':
+      renderInsurancePage(main, { equipment: allEquipment, insurance: allInsurance, settings: appSettings, showModal, refresh: renderPage, navigate });
+      break;
     case 'odometer':
       renderOdometerPage(main);
       break;
@@ -298,7 +331,7 @@ async function renderPage() {
 
 function renderDashboard(container) {
   renderWorkboard(container, {
-    equipment: allEquipment, maintenance: allMaintenance, records: allRecords,
+    equipment: allEquipment, maintenance: allMaintenance, records: allRecords, fuel: allFuel, permits: allPermits, insurance: allInsurance,
     demo: demoMode, navigate, logService: showLogServiceModal,
     addEquipment: showAddEquipmentModal, setupSchedule: showSetupScheduleModal,
   });
@@ -311,7 +344,7 @@ function renderDemoBanner(container) {
   container.insertAdjacentHTML('afterbegin', `
     <aside class="demo-banner" aria-label="Demo mode">
       <div><strong>Demo fleet</strong><span>Sample data · Try it freely</span></div>
-      <div><button class="btn btn-ghost btn-sm" id="reset-demo">Reset demo</button><button class="btn btn-secondary btn-sm" id="exit-demo">Exit demo →</button></div>
+      <div><button class="btn btn-ghost btn-sm" id="load-seed-demo">Seed fleet</button><button class="btn btn-ghost btn-sm" id="reset-demo">Reset demo</button><button class="btn btn-secondary btn-sm" id="exit-demo">Exit demo →</button></div>
     </aside>`);
   container.querySelector('#exit-demo').addEventListener('click', returnToLanding);
   container.querySelector('#reset-demo').addEventListener('click', async (event) => {
@@ -320,6 +353,12 @@ function renderDemoBanner(container) {
     if (getRoute().page !== 'dashboard') navigate('dashboard');
     else await renderPage();
     showToast('Sample fleet reset', 'success');
+  });
+  container.querySelector('#load-seed-demo')?.addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    await db.loadSeedData();
+    await renderPage();
+    showToast('Loaded 15 units & 16 fuel receipts', 'success');
   });
 }
 
@@ -411,6 +450,9 @@ function renderEquipmentDetail(container, eqId) {
 
   const eqMaint = allMaintenance.filter((m) => m.equipmentId === eqId);
   const eqRecords = allRecords.filter((r) => r.equipmentId === eqId).sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+  const eqFuel = fuelLines(allFuel).filter((f) => f.equipmentId === eqId).sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+  const eqPermits = allPermits.filter((p) => p.equipmentId === eqId);
+  const eqInsurance = allInsurance.filter((i) => Number(i.equipmentId) === eqId);
   const typeLabel = EQUIPMENT_TYPES.find((t) => t.value === eq.type)?.label || eq.type;
 
   container.innerHTML = `
@@ -446,9 +488,13 @@ function renderEquipmentDetail(container, eqId) {
         </div>
       </div>
 
+      ${renderUnitCosts(eq, eqRecords, eqFuel)}
+
       <div class="tabs" id="detail-tabs">
         <button class="tab active" data-tab="maint">Maintenance Schedule</button>
         <button class="tab" data-tab="records">Service Records (${eqRecords.length})</button>
+        <button class="tab" data-tab="permits">Permits (${eqPermits.length})</button>
+        <button class="tab" data-tab="insurance">Insurance (${eqInsurance.length})</button>
       </div>
 
       <div id="tab-content-maint">
@@ -554,6 +600,14 @@ function renderEquipmentDetail(container, eqId) {
           </div>
         `}
       </div>
+
+      <div id="tab-content-permits" class="hidden">
+        ${renderEquipmentPermitsSection(eq, eqPermits)}
+      </div>
+
+      <div id="tab-content-insurance" class="hidden">
+        ${renderEquipmentInsuranceSection(eq, eqInsurance, allInsurance, { showModal, refresh: renderPage })}
+      </div>
     </div>
   `;
 
@@ -567,9 +621,13 @@ function renderEquipmentDetail(container, eqId) {
     const tabName = tab.dataset.tab;
     container.querySelector('#tab-content-maint').classList.toggle('hidden', tabName !== 'maint');
     container.querySelector('#tab-content-records').classList.toggle('hidden', tabName !== 'records');
+    container.querySelector('#tab-content-permits').classList.toggle('hidden', tabName !== 'permits');
+    container.querySelector('#tab-content-insurance')?.classList.toggle('hidden', tabName !== 'insurance');
   });
 
   if (getRoute().params[1] === 'records') container.querySelector('[data-tab="records"]').click();
+  if (getRoute().params[1] === 'permits') container.querySelector('[data-tab="permits"]').click();
+  if (getRoute().params[1] === 'insurance') container.querySelector('[data-tab="insurance"]')?.click();
   // Back button
   container.querySelector('#btn-back').addEventListener('click', () => navigate('equipment'));
 
@@ -582,7 +640,7 @@ function renderEquipmentDetail(container, eqId) {
       <div class="alert-item alert-item-red mb-md">
         ${icons.alertTriangle} <strong>This action cannot be undone.</strong>
       </div>
-      <p class="text-secondary mb-md">Permanently delete <strong>Unit ${escapeHtml(eq.unitNumber)}</strong> and all associated maintenance schedules and service records?</p>
+      <p class="text-secondary mb-md">Permanently delete <strong>Unit ${escapeHtml(eq.unitNumber)}</strong> and all associated maintenance schedules, service records, fuel entries, permits, and unit-specific insurance policies?</p>
     `;
     const deleteFooter = `
       <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
@@ -596,6 +654,89 @@ function renderEquipmentDetail(container, eqId) {
         close();
         navigate('equipment');
       });
+    });
+  });
+
+  // Unit Permits event handlers
+  container.querySelector('#btn-add-unit-permit')?.addEventListener('click', () => {
+    showPermitModal({
+      equipment: allEquipment,
+      permit: null,
+      preselectedEquipmentId: eq.id,
+      geminiApiKey: appSettings.geminiApiKey,
+      showModal,
+      onSave: async () => {
+        await loadAllData();
+        renderEquipmentDetail(container, eqId);
+      },
+    });
+  });
+
+  container.querySelectorAll('.btn-fix-missing-permit').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const permitType = btn.dataset.permitType;
+      showPermitModal({
+        equipment: allEquipment,
+        permit: null,
+        preselectedEquipmentId: eq.id,
+        preselectedPermitType: permitType,
+        geminiApiKey: appSettings.geminiApiKey,
+        showModal,
+        onSave: async () => {
+          await loadAllData();
+          renderEquipmentDetail(container, eqId);
+        },
+      });
+    });
+  });
+
+  container.querySelectorAll('.unit-permit-edit').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const permitId = Number(btn.dataset.permitId);
+      const permit = allPermits.find((p) => p.id === permitId);
+      if (permit) {
+        showPermitModal({
+          equipment: allEquipment,
+          permit,
+          geminiApiKey: appSettings.geminiApiKey,
+          showModal,
+          onSave: async () => {
+            await loadAllData();
+            renderEquipmentDetail(container, eqId);
+          },
+        });
+      }
+    });
+  });
+
+  // Unit Insurance event handlers
+  container.querySelector('#btn-add-unit-insurance')?.addEventListener('click', () => {
+    showInsuranceModal({
+      equipment: allEquipment,
+      settings: appSettings,
+      showModal,
+      refresh: async () => {
+        await loadAllData();
+        renderEquipmentDetail(container, eqId);
+      },
+    }, null, eq.id);
+  });
+
+  container.querySelectorAll('.unit-insurance-edit').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const policyId = Number(btn.dataset.id);
+      const policy = allInsurance.find((p) => p.id === policyId);
+      if (policy) {
+        showInsuranceModal({
+          equipment: allEquipment,
+          settings: appSettings,
+          showModal,
+          refresh: async () => {
+            await loadAllData();
+            renderEquipmentDetail(container, eqId);
+          },
+        }, policy);
+      }
     });
   });
 
@@ -840,24 +981,32 @@ function renderOdometerPage(container) {
         ${hasApiKey ? `
           <div class="form-group mb-md">
             <label class="form-label" id="meter-upload-label">Upload Odometer Photo</label>
-            <div class="photo-upload" id="odometer-upload-zone">
-              ${icons.camera}
-              <span id="meter-upload-text">Click or drag to upload odometer photo</span>
-              <input type="file" accept="image/*" id="odometer-file" capture="environment" />
+            <label class="receipt-upload" id="odometer-upload-zone" for="odometer-file">
+              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" id="odometer-file" capture="environment" aria-label="Upload odometer or hour meter photo" />
+              <span class="receipt-upload-icon">${icons.camera}</span>
+              <span>
+                <strong id="meter-upload-title">Drop your odometer photo here</strong>
+                <span class="text-sm text-secondary" id="meter-upload-subtitle">Choose a photo or take one on your phone</span>
+                <span class="text-xs text-tertiary">JPG, PNG, WebP · up to 10 MB</span>
+              </span>
+              <span class="receipt-upload-plus">${icons.plus}</span>
+            </label>
+            <div id="odometer-preview" class="hidden mt-xs text-center"></div>
+            <div class="fuel-receipt-tools">
+              <button type="button" class="btn btn-ghost btn-sm hidden" id="odometer-remove-photo">Remove photo</button>
             </div>
             <div id="reefer-guide" class="text-sm mt-xs hidden" style="color:var(--text-muted);line-height:1.4;">
               💡 <strong>Reefer Guide:</strong> Photograph the <strong>Hourmeters / Gauges</strong> screen (Thermo King: <em>Menu &rarr; Hourmeters / Gauges</em> &bull; Carrier: <em>Unit / Engine Hours</em>).
             </div>
           </div>
-          <div id="ocr-result" class="hidden"></div>
         ` : `
           <div class="alert-item alert-item-yellow mb-md">
             ${icons.alertTriangle}
-            <span>
-              ${demoMode ? 'Try entering a sample reading below. Photo reading is available in your own fleet.' : 'Add a Gemini API key in <strong style="cursor:pointer;text-decoration:underline;" id="go-settings">Settings</strong> to enable photo-based mileage reading.'}
-            </span>
+            <span>Add a Gemini API key in <strong style="cursor:pointer;text-decoration:underline;" class="go-settings" id="go-settings">Settings</strong> to enable photo-based AI assistance.</span>
           </div>
         `}
+
+        <div id="ocr-result" class="hidden mb-md"></div>
 
         <div class="form-group mb-md">
           <label class="form-label" for="manual-mileage">
@@ -880,6 +1029,9 @@ function renderOdometerPage(container) {
   const saveBtn = container.querySelector('#btn-save-mileage');
   const odometerFile = container.querySelector('#odometer-file');
   const uploadZone = container.querySelector('#odometer-upload-zone');
+  const previewEl = container.querySelector('#odometer-preview');
+  const removePhotoBtn = container.querySelector('#odometer-remove-photo');
+  const uploadTitle = container.querySelector('#meter-upload-title');
   const ocrResult = container.querySelector('#ocr-result');
   let pendingMileage = null;
 
@@ -892,7 +1044,6 @@ function renderOdometerPage(container) {
     const eq = allEquipment.find((item) => item.id === Number(unitSelect.value));
     const hours = eq?.type === 'reefer';
     const uploadLabel = container.querySelector('#meter-upload-label');
-    const uploadText = container.querySelector('#meter-upload-text');
     const reeferGuide = container.querySelector('#reefer-guide');
 
     container.querySelector('label[for="manual-mileage"]').textContent = hours
@@ -904,10 +1055,11 @@ function renderOdometerPage(container) {
     if (uploadLabel) {
       uploadLabel.textContent = hours ? 'Upload Hour-Meter Photo' : 'Upload Odometer Photo';
     }
-    if (uploadText) {
-      uploadText.textContent = hours
-        ? 'Click or drag to upload reefer hour-meter photo'
-        : 'Click or drag to upload odometer photo';
+    if (uploadTitle) {
+      const hasPhoto = !previewEl.classList.contains('hidden');
+      uploadTitle.textContent = hasPhoto
+        ? `${hours ? 'Hour meter' : 'Odometer'} photo attached · choose a new photo`
+        : (hours ? 'Drop your reefer hour-meter photo here' : 'Drop your odometer photo here');
     }
     if (reeferGuide) {
       reeferGuide.classList.toggle('hidden', !hours);
@@ -930,77 +1082,126 @@ function renderOdometerPage(container) {
   });
 
   // Go to settings link
-  const goSettings = container.querySelector('#go-settings');
-  if (goSettings) {
-    goSettings.addEventListener('click', () => navigate('settings'));
+  container.querySelectorAll('.go-settings').forEach(el => {
+    el.addEventListener('click', () => navigate('settings'));
+  });
+
+  // Drag and drop handlers
+  if (uploadZone) {
+    uploadZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadZone.classList.add('is-dragging');
+    });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('is-dragging'));
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('is-dragging');
+      if (e.dataTransfer.files?.[0]) {
+        handleOdometerFile({ target: { files: e.dataTransfer.files } });
+      }
+    });
   }
 
   // OCR upload
-  if (odometerFile) {
-    async function handleOdometerFile(e) {
-      const file = e.target.files[0];
-      if (!file) return;
+  async function handleOdometerFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-      const eq = allEquipment.find((item) => item.id === Number(unitSelect.value));
-      const hours = eq?.type === 'reefer';
+    const eq = allEquipment.find((item) => item.id === Number(unitSelect.value));
+    const hours = eq?.type === 'reefer';
 
-      // Show preview
-      const previewUrl = URL.createObjectURL(file);
-      uploadZone.classList.add('has-image');
-      uploadZone.innerHTML = `<img src="${previewUrl}" alt="${hours ? 'Hour meter photo' : 'Odometer photo'}" /><input type="file" accept="image/*" id="odometer-file" capture="environment" />`;
+    // Show preview
+    const previewUrl = URL.createObjectURL(file);
+    previewEl.innerHTML = `<img src="${previewUrl}" alt="${hours ? 'Hour meter photo' : 'Odometer photo'}" style="max-height:160px;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);" />`;
+    previewEl.classList.remove('hidden');
+    removePhotoBtn.classList.remove('hidden');
+    uploadTitle.textContent = `${hours ? 'Hour meter' : 'Odometer'} photo attached · choose a new photo`;
 
-      // Re-attach file listener
-      uploadZone.querySelector('#odometer-file').addEventListener('change', handleOdometerFile);
-
-      // Call AI
+    if (!hasApiKey) {
       ocrResult.classList.remove('hidden');
-      ocrResult.innerHTML = `<div class="card" style="text-align:center;padding:2rem;"><div style="animation:pulse 1.5s infinite;">Reading ${hours ? 'hour meter' : 'odometer'}...</div></div>`;
+      ocrResult.innerHTML = `
+        <div class="alert-item alert-item-yellow">
+          ${icons.alertTriangle}
+          <span>Add a Gemini API key in <strong style="cursor:pointer;text-decoration:underline;" class="go-settings">Settings</strong> to enable photo-based AI assistance. Please enter reading manually below.</span>
+        </div>
+      `;
+      ocrResult.querySelectorAll('.go-settings').forEach(el => el.addEventListener('click', () => navigate('settings')));
+      return;
+    }
 
-      try {
-        const result = await readOdometer(appSettings.geminiApiKey, file, { isHours: hours });
+    // Call AI
+    ocrResult.classList.remove('hidden');
+    ocrResult.innerHTML = `<div class="card" style="text-align:center;padding:2rem;"><div style="animation:pulse 1.5s infinite;">Reading ${hours ? 'hour meter' : 'odometer'}...</div></div>`;
 
-        if (result.mileage != null) {
-          pendingMileage = result.mileage;
-          const confColor = result.confidence === 'high' ? 'var(--status-green)' : result.confidence === 'medium' ? 'var(--status-yellow)' : 'var(--status-red)';
-          const formattedReading = hours ? `${Number(result.mileage).toLocaleString()} hrs` : formatMileage(result.mileage);
+    try {
+      const result = await readOdometer(appSettings.geminiApiKey, file, { isHours: hours });
 
-          ocrResult.innerHTML = `
-            <div class="ocr-confirm">
-              <div class="ocr-note">AI reading <span style="color:${confColor};font-weight:600;">(${result.confidence} confidence)</span></div>
-              <div class="ocr-reading">${formattedReading}</div>
-              <div class="ocr-note">${escapeHtml(result.raw)}</div>
-              <div class="ocr-note" style="color:var(--status-yellow);">
-                ${icons.alertTriangle} Please verify this reading matches your ${hours ? 'hour-meter' : 'odometer'} photo before saving.
-              </div>
+      if (result.mileage != null) {
+        pendingMileage = result.mileage;
+        const confColor = result.confidence === 'high' ? 'var(--status-green)' : result.confidence === 'medium' ? 'var(--status-yellow)' : 'var(--status-red)';
+        const formattedReading = hours ? `${Number(result.mileage).toLocaleString()} hrs` : formatMileage(result.mileage);
+
+        ocrResult.innerHTML = `
+          <div class="ocr-confirm">
+            <div class="ocr-note">AI reading <span style="color:${confColor};font-weight:600;">(${result.confidence} confidence)</span></div>
+            <div class="ocr-reading">${formattedReading}</div>
+            <div class="ocr-note">${escapeHtml(result.raw)}</div>
+            <div class="ocr-note" style="color:var(--status-yellow);">
+              ${icons.alertTriangle} Please verify this reading matches your ${hours ? 'hour-meter' : 'odometer'} photo before saving.
             </div>
-          `;
-          manualInput.value = result.mileage;
-          checkReady();
-        } else {
-          const fallbackMsg = hours
-            ? (result.raw || 'Could not read the hour meter. Please ensure the Hourmeters / Gauges screen is visible and enter hours manually.')
-            : (result.isOdometer === false ? 'This does not appear to be an odometer image.' : 'Could not read the odometer.') + ' Please enter the mileage manually.';
-          ocrResult.innerHTML = `
-            <div class="alert-item alert-item-red">
-              ${icons.alertTriangle}
-              <span>${escapeHtml(fallbackMsg)}</span>
-            </div>
-          `;
-        }
-      } catch (err) {
-        console.error('Meter OCR error:', err);
-        const failMsg = hours
-          ? 'Unable to read hour meter automatically. Please enter engine hours manually.'
-          : 'Unable to read image automatically. Please enter mileage manually.';
+          </div>
+        `;
+        manualInput.value = result.mileage;
+        checkReady();
+      } else {
+        const fallbackMsg = hours
+          ? (result.raw || 'Could not read the hour meter. Please ensure the Hourmeters / Gauges screen is visible and enter hours manually.')
+          : (result.isOdometer === false ? 'This does not appear to be an odometer image.' : 'Could not read the odometer.') + ' Please enter the mileage manually.';
         ocrResult.innerHTML = `
           <div class="alert-item alert-item-red">
             ${icons.alertTriangle}
-            <span>${failMsg}</span>
+            <span>${escapeHtml(fallbackMsg)}</span>
           </div>
         `;
       }
+    } catch (err) {
+      console.error('Meter OCR error:', err);
+      const failMsg = hours
+        ? 'Unable to read hour meter automatically. Please enter engine hours manually.'
+        : 'Unable to read image automatically. Please enter mileage manually.';
+      ocrResult.innerHTML = `
+        <div class="alert-item alert-item-red">
+          ${icons.alertTriangle}
+          <span>${failMsg}</span>
+        </div>
+      `;
     }
+  }
+
+  if (odometerFile) {
     odometerFile.addEventListener('change', handleOdometerFile);
+  }
+
+  if (removePhotoBtn) {
+    removePhotoBtn.addEventListener('click', () => {
+      if (odometerFile) odometerFile.value = '';
+      if (previewEl) {
+        previewEl.innerHTML = '';
+        previewEl.classList.add('hidden');
+      }
+      removePhotoBtn.classList.add('hidden');
+      const eq = allEquipment.find((item) => item.id === Number(unitSelect.value));
+      const hours = eq?.type === 'reefer';
+      if (uploadTitle) {
+        uploadTitle.textContent = hours ? 'Drop your reefer hour-meter photo here' : 'Drop your odometer photo here';
+      }
+      if (ocrResult) {
+        ocrResult.innerHTML = '';
+        ocrResult.classList.add('hidden');
+      }
+      pendingMileage = null;
+      checkReady();
+    });
   }
 
   // Save mileage
@@ -1056,8 +1257,14 @@ function renderOdometerPage(container) {
 
 function renderSettingsPage(container) {
   if (demoMode) {
-    container.innerHTML = `<header class="page-header"><h2>Demo settings</h2></header><div class="page-body"><div class="card" style="max-width:600px"><h3>Explore with sample data</h3><p class="text-secondary mt-sm">You can add units, update readings, and log services here. Reset demo restores the sample fleet.</p><p class="text-secondary mt-sm">Photo reading and AI interval lookup are available in your own fleet after adding a Gemini API key. This demo makes no AI requests.</p><button class="btn btn-primary mt-lg" id="demo-settings-exit">Back to landing page</button></div></div>`;
+    container.innerHTML = `<header class="page-header"><h2>Demo settings</h2></header><div class="page-body"><div class="card" style="max-width:600px"><h3>Explore with sample data</h3><p class="text-secondary mt-sm">You can add units, update readings, and log services here. Reset demo restores the baseline sample fleet, or load the expanded seed fleet for complete UI/UX testing.</p><p class="text-secondary mt-sm">Photo reading and AI interval lookup are available in your own fleet after adding a Gemini API key. This demo makes no AI requests.</p><div class="flex gap-sm mt-lg" style="flex-wrap:wrap;"><button class="btn btn-secondary" id="demo-settings-seed">${icons.fuel || ''} Load Seed Fleet (15 units)</button><button class="btn btn-primary" id="demo-settings-exit">Back to landing page</button></div></div></div>`;
     container.querySelector('#demo-settings-exit').addEventListener('click', returnToLanding);
+    container.querySelector('#demo-settings-seed')?.addEventListener('click', async (e) => {
+      e.currentTarget.disabled = true;
+      await db.loadSeedData();
+      showToast('Loaded 15 units & 16 fuel receipts', 'success');
+      navigate('fuel');
+    });
     return;
   }
   container.innerHTML = `
@@ -1068,7 +1275,7 @@ function renderSettingsPage(container) {
       <div class="card" style="max-width:600px;margin-bottom:1.5rem;">
         <h3 class="mb-md">AI Vision (Gemini API)</h3>
         <p class="text-sm text-secondary mb-md">
-          Add a Gemini API key to enable photo-based odometer reading and service record scanning.
+          Add a Gemini API key to enable photo-based odometer reading and AI assisted document scanning.
           Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);">aistudio.google.com</a>.
         </p>
         <div class="form-group">
@@ -1130,6 +1337,9 @@ function renderSettingsPage(container) {
           </button>
           <button class="btn btn-secondary" id="btn-import">
             ${icons.upload} Import Backup
+          </button>
+          <button class="btn btn-secondary" id="btn-load-seed">
+            ${icons.fuel || ''} Load Seed Fleet
           </button>
           <input type="file" id="import-file" accept=".json" class="hidden" />
         </div>
@@ -1199,12 +1409,25 @@ function renderSettingsPage(container) {
     const hasKey = !!appSettings.geminiApiKey;
     showModal(
       'Export Backup',
-      `<p class="text-secondary mb-md">Download a JSON backup of <strong>all equipment, maintenance schedules, and service records</strong>.</p>
-       <div class="alert-item alert-item-yellow mb-md">
-         ${icons.alertTriangle}
-         <span>The backup file is <strong>not encrypted</strong>. Anyone with access to this file can read your fleet data.</span>
+      `<p class="text-secondary mb-md">Download a backup of <strong>all equipment, maintenance schedules, service records, fuel receipts, and permits</strong>.</p>
+       <div class="backup-security-box">
+         <div class="flex items-center justify-between mb-xs">
+           <label for="export-password" class="text-sm font-medium flex items-center gap-xs">
+             ${icons.lock} Password Protection (Optional)
+           </label>
+           <span class="security-badge">${icons.shield} AES-256</span>
+         </div>
+         <p class="text-secondary text-xs mb-sm">
+           Protect your backup in transit. If set, this password will be required when importing or viewing this file. Leave blank for unencrypted JSON.
+         </p>
+         <div class="password-input-wrap">
+           <input type="password" id="export-password" class="form-input" placeholder="Leave blank to export unencrypted" autocomplete="new-password" />
+           <button type="button" class="btn-toggle-password" id="btn-toggle-export-pwd" aria-label="Show password" title="Toggle password visibility">
+             ${icons.eye}
+           </button>
+         </div>
        </div>${hasKey ? `
-       <label class="cyber-check">
+       <label class="cyber-check mb-md">
          <input type="checkbox" id="chk-include-key" />
          <span class="cyber-check__track"></span>
          <span class="cyber-check__label">Include my <strong>Gemini API key</strong> in the backup</span>
@@ -1212,31 +1435,64 @@ function renderSettingsPage(container) {
       `<button class="btn btn-secondary" id="modal-cancel-export">Cancel</button>
        <button class="btn btn-primary" id="modal-confirm-export">${icons.download} Export Backup</button>`,
       (overlay, close) => {
+        const pwdInput = overlay.querySelector('#export-password');
+        const toggleBtn = overlay.querySelector('#btn-toggle-export-pwd');
+        if (toggleBtn && pwdInput) {
+          toggleBtn.addEventListener('click', () => {
+            const isPassword = pwdInput.type === 'password';
+            pwdInput.type = isPassword ? 'text' : 'password';
+            toggleBtn.innerHTML = isPassword ? icons.eyeOff : icons.eye;
+            toggleBtn.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+          });
+        }
+
         overlay.querySelector('#modal-cancel-export').addEventListener('click', close);
         overlay.querySelector('#modal-confirm-export').addEventListener('click', async () => {
-          const includeKey = overlay.querySelector('#chk-include-key')?.checked ?? false;
-          const data = await db.exportAllData();
+          const confirmBtn = overlay.querySelector('#modal-confirm-export');
+          confirmBtn.disabled = true;
+          try {
+            const password = pwdInput ? pwdInput.value : '';
+            const includeKey = overlay.querySelector('#chk-include-key')?.checked ?? false;
+            const data = await db.exportAllData();
 
-          // Strip API key from settings unless user opted in
-          if (!includeKey && data.settings) {
-            data.settings = data.settings.map(s => {
-              if (s.geminiApiKey) {
-                const { geminiApiKey, ...rest } = s;
-                return rest;
-              }
-              return s;
-            });
+            // Strip API key from settings unless user opted in
+            if (!includeKey && data.settings) {
+              data.settings = data.settings.map(s => {
+                if (s.geminiApiKey) {
+                  const { geminiApiKey, ...rest } = s;
+                  return rest;
+                }
+                return s;
+              });
+            }
+
+            let exportPayload = data;
+            let fileExt = 'json';
+            const isEncrypted = Boolean(password && password.trim());
+
+            if (isEncrypted) {
+              exportPayload = await encryptBackup(data, password.trim());
+              fileExt = 'enc.json';
+            }
+
+            const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `fleet-pulse-backup-${new Date().toISOString().slice(0, 10)}.${fileExt}`;
+            a.click();
+            URL.revokeObjectURL(url);
+            close();
+            showToast(
+              isEncrypted
+                ? 'Encrypted backup exported (AES-256 protected)'
+                : 'Backup exported' + (includeKey ? ' (includes API key)' : ''),
+              'success'
+            );
+          } catch (err) {
+            showToast(`Export failed: ${err.message}`, 'error');
+            confirmBtn.disabled = false;
           }
-
-          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `fleet-pulse-backup-${new Date().toISOString().slice(0, 10)}.json`;
-          a.click();
-          URL.revokeObjectURL(url);
-          close();
-          showToast('Backup exported' + (includeKey ? ' (includes API key)' : ''), 'success');
         });
       }
     );
@@ -1244,36 +1500,390 @@ function renderSettingsPage(container) {
 
   // Import
   const importFile = container.querySelector('#import-file');
-  container.querySelector('#btn-import').addEventListener('click', () => importFile.click());
+  container.querySelector('#btn-import').addEventListener('click', () => {
+    importFile.value = '';
+    importFile.click();
+  });
+
   importFile.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
       const text = await file.text();
-      const data = JSON.parse(text);
-      const importBody = `
-        <div class="alert-item alert-item-yellow mb-md">
-          ${icons.alertTriangle} <strong>This will replace all current data</strong>
+      let rawData;
+      try {
+        rawData = JSON.parse(text);
+      } catch {
+        throw new Error('Selected file is not valid JSON.');
+      }
+
+      if (isEncryptedBackup(rawData)) {
+        promptDecryptAndReview(file, rawData);
+      } else {
+        db.validateBackupPayload(rawData);
+        showReviewDiffModal(file, rawData);
+      }
+    } catch (err) {
+      showToast(`Import failed: ${err.message}`, 'error');
+      importFile.value = '';
+    }
+  });
+
+  function promptDecryptAndReview(file, encryptedData) {
+    showModal(
+      'Unlock Encrypted Backup',
+      `
+      <div class="alert-item alert-item-blue mb-md">
+        ${icons.lock}
+        <div>
+          This backup file (<strong>${escapeHtml(file.name)}</strong>) is encrypted with <strong>AES-256-GCM</strong>. Enter the password used during export to decrypt it.
         </div>
-        <p class="text-secondary mb-md">Restoring from <strong>${escapeHtml(file.name)}</strong> will overwrite all existing equipment, maintenance schedules, and service records.</p>
-        <p class="text-secondary text-sm">Export a backup first if you want to keep your current data.</p>
-      `;
-      showModal('Restore Backup', importBody,
-        `<button class="btn btn-ghost" id="modal-cancel">Cancel</button>
-         <button class="btn btn-danger" id="modal-confirm-import">${icons.upload || ''} Replace All Data</button>`,
-        (overlay, close) => {
-          overlay.querySelector('#modal-cancel').addEventListener('click', close);
-          overlay.querySelector('#modal-confirm-import').addEventListener('click', async () => {
+      </div>
+
+      <div class="form-group mb-md">
+        <label for="modal-import-password" class="form-label">Backup Password</label>
+        <div class="password-input-wrap">
+          <input type="password" id="modal-import-password" class="form-input" placeholder="Enter backup password" autofocus autocomplete="current-password" />
+          <button type="button" class="btn-toggle-password" id="btn-toggle-import-pwd" aria-label="Show password" title="Toggle password visibility">
+            ${icons.eye}
+          </button>
+        </div>
+        <div id="modal-import-error" class="form-hint text-red mt-xs" style="display:none;"></div>
+      </div>
+
+      <p class="text-secondary text-xs">
+        Data is decrypted locally in your browser memory. Fleet Pulse never transmits your password or fleet data over a network.
+      </p>
+      `,
+      `
+      <button class="btn btn-ghost" id="modal-cancel-decrypt">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm-decrypt">${icons.lock} Unlock & Review</button>
+      `,
+      (overlay, close) => {
+        const pwdInput = overlay.querySelector('#modal-import-password');
+        const toggleBtn = overlay.querySelector('#btn-toggle-import-pwd');
+        const errorEl = overlay.querySelector('#modal-import-error');
+        const unlockBtn = overlay.querySelector('#modal-confirm-decrypt');
+
+        if (toggleBtn && pwdInput) {
+          toggleBtn.addEventListener('click', () => {
+            const isPassword = pwdInput.type === 'password';
+            pwdInput.type = isPassword ? 'text' : 'password';
+            toggleBtn.innerHTML = isPassword ? icons.eyeOff : icons.eye;
+            toggleBtn.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+          });
+        }
+
+        overlay.querySelector('#modal-cancel-decrypt').addEventListener('click', () => {
+          close();
+          importFile.value = '';
+        });
+
+        const handleUnlock = async () => {
+          const pwd = pwdInput ? pwdInput.value : '';
+          if (!pwd) {
+            errorEl.textContent = 'Please enter the backup password.';
+            errorEl.style.display = 'block';
+            pwdInput.focus();
+            return;
+          }
+
+          errorEl.style.display = 'none';
+          unlockBtn.disabled = true;
+          unlockBtn.textContent = 'Decrypting...';
+
+          try {
+            const decrypted = await decryptBackup(encryptedData, pwd);
+            db.validateBackupPayload(decrypted);
             close();
-            await db.importAllData(data);
-            showToast('Backup restored', 'success');
-            renderPage();
+            showReviewDiffModal(file, decrypted);
+          } catch (err) {
+            errorEl.textContent = err.message || 'Incorrect password or corrupted backup file.';
+            errorEl.style.display = 'block';
+            unlockBtn.disabled = false;
+            unlockBtn.innerHTML = `${icons.lock} Unlock & Review`;
+            pwdInput.select();
+            pwdInput.focus();
+          }
+        };
+
+        unlockBtn.addEventListener('click', handleUnlock);
+        pwdInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            handleUnlock();
+          }
+        });
+      }
+    );
+  }
+
+  async function showReviewDiffModal(file, data) {
+    try {
+      const currentData = await db.exportAllData();
+      const diff = db.calculateImportDiff(currentData, data);
+      const totals = diff.totals;
+
+      const formatDiffItem = (item) => `<li class="import-diff-item">${item}</li>`;
+
+      let equipmentHtml = '';
+      if (diff.equipment.newCount > 0 || diff.equipment.updatedCount > 0 || diff.equipment.skippedCount > 0) {
+        const items = [];
+        if (diff.equipment.newCount > 0) {
+          const names = diff.equipment.newItems.map(i => escapeHtml(i.unitNumber)).join(', ');
+          items.push(`<span>New units to add: <code>${names}</code></span>`);
+        }
+        for (const upd of diff.equipment.updatedItems) {
+          const changeNotes = [];
+          if (upd.changes.odometer) {
+            changeNotes.push(`Odometer: ${upd.changes.odometer.from.toLocaleString()} → ${upd.changes.odometer.to.toLocaleString()} mi`);
+          }
+          if (upd.changes.hours) {
+            changeNotes.push(`Hours: ${upd.changes.hours.from.toLocaleString()} → ${upd.changes.hours.to.toLocaleString()} hrs`);
+          }
+          if (!changeNotes.length && upd.changes.newerTimestamp) {
+            changeNotes.push('Updated details');
+          }
+          items.push(`<span><code>${escapeHtml(upd.unitNumber)}</code>: ${changeNotes.join(', ')}</span>`);
+        }
+        if (diff.equipment.skippedCount > 0) {
+          items.push(`<span>${diff.equipment.skippedCount} existing units identical (no updates needed)</span>`);
+        }
+
+        equipmentHtml = `
+          <div class="import-diff-group">
+            <div class="import-diff-header">
+              <span class="import-diff-title">${icons.truck || ''} Equipment</span>
+              <div class="import-diff-badges">
+                ${diff.equipment.newCount > 0 ? `<span class="badge badge-green">+${diff.equipment.newCount} new</span>` : ''}
+                ${diff.equipment.updatedCount > 0 ? `<span class="badge badge-yellow">${diff.equipment.updatedCount} updated</span>` : ''}
+                ${diff.equipment.skippedCount > 0 ? `<span class="badge">${diff.equipment.skippedCount} kept</span>` : ''}
+              </div>
+            </div>
+            <ul class="import-diff-list">
+              ${items.map(formatDiffItem).join('')}
+            </ul>
+          </div>
+        `;
+      }
+
+      let recordsHtml = '';
+      if (diff.records.newCount > 0 || diff.records.skippedCount > 0) {
+        recordsHtml = `
+          <div class="import-diff-group">
+            <div class="import-diff-header">
+              <span class="import-diff-title">${icons.fileText || ''} Service Records</span>
+              <div class="import-diff-badges">
+                ${diff.records.newCount > 0 ? `<span class="badge badge-green">+${diff.records.newCount} new</span>` : ''}
+                ${diff.records.skippedCount > 0 ? `<span class="badge">${diff.records.skippedCount} skipped</span>` : ''}
+              </div>
+            </div>
+            <ul class="import-diff-list">
+              ${diff.records.newCount > 0 ? `<li class="import-diff-item">+${diff.records.newCount} completed service records will be appended.</li>` : ''}
+              ${diff.records.skippedCount > 0 ? `<li class="import-diff-item text-tertiary">${diff.records.skippedCount} service records already exist and will not be duplicated.</li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+
+      let fuelHtml = '';
+      if (diff.fuel.newCount > 0 || diff.fuel.skippedCount > 0) {
+        fuelHtml = `
+          <div class="import-diff-group">
+            <div class="import-diff-header">
+              <span class="import-diff-title">${icons.fuel || ''} Fuel Transactions</span>
+              <div class="import-diff-badges">
+                ${diff.fuel.newCount > 0 ? `<span class="badge badge-green">+${diff.fuel.newCount} new</span>` : ''}
+                ${diff.fuel.skippedCount > 0 ? `<span class="badge">${diff.fuel.skippedCount} skipped</span>` : ''}
+              </div>
+            </div>
+            <ul class="import-diff-list">
+              ${diff.fuel.newCount > 0 ? `<li class="import-diff-item">+${diff.fuel.newCount} fuel purchases will be appended.</li>` : ''}
+              ${diff.fuel.skippedCount > 0 ? `<li class="import-diff-item text-tertiary">${diff.fuel.skippedCount} fuel receipts already exist and will not be duplicated.</li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+
+      let permitsHtml = '';
+      if (diff.permits.newCount > 0 || diff.permits.skippedCount > 0) {
+        permitsHtml = `
+          <div class="import-diff-group">
+            <div class="import-diff-header">
+              <span class="import-diff-title">${icons.permit || icons.shield || ''} Permits & Credentials</span>
+              <div class="import-diff-badges">
+                ${diff.permits.newCount > 0 ? `<span class="badge badge-green">+${diff.permits.newCount} new</span>` : ''}
+                ${diff.permits.skippedCount > 0 ? `<span class="badge">${diff.permits.skippedCount} skipped</span>` : ''}
+              </div>
+            </div>
+            <ul class="import-diff-list">
+              ${diff.permits.newCount > 0 ? `<li class="import-diff-item">+${diff.permits.newCount} permits/credentials will be appended.</li>` : ''}
+              ${diff.permits.skippedCount > 0 ? `<li class="import-diff-item text-tertiary">${diff.permits.skippedCount} permits already exist locally.</li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+
+      let insuranceHtml = '';
+      if (diff.insurance.newCount > 0 || diff.insurance.skippedCount > 0) {
+        insuranceHtml = `
+          <div class="import-diff-group">
+            <div class="import-diff-header">
+              <span class="import-diff-title">${icons.shield || ''} Insurance Policies</span>
+              <div class="import-diff-badges">
+                ${diff.insurance.newCount > 0 ? `<span class="badge badge-green">+${diff.insurance.newCount} new</span>` : ''}
+                ${diff.insurance.skippedCount > 0 ? `<span class="badge">${diff.insurance.skippedCount} skipped</span>` : ''}
+              </div>
+            </div>
+            <ul class="import-diff-list">
+              ${diff.insurance.newCount > 0 ? `<li class="import-diff-item">+${diff.insurance.newCount} insurance policies will be appended.</li>` : ''}
+              ${diff.insurance.skippedCount > 0 ? `<li class="import-diff-item text-tertiary">${diff.insurance.skippedCount} insurance policies already exist locally.</li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+
+      let maintenanceHtml = '';
+      if (diff.maintenance.newCount > 0 || diff.maintenance.skippedCount > 0) {
+        maintenanceHtml = `
+          <div class="import-diff-group">
+            <div class="import-diff-header">
+              <span class="import-diff-title">${icons.wrench || ''} Maintenance Schedules</span>
+              <div class="import-diff-badges">
+                ${diff.maintenance.newCount > 0 ? `<span class="badge badge-green">+${diff.maintenance.newCount} new</span>` : ''}
+                ${diff.maintenance.skippedCount > 0 ? `<span class="badge">${diff.maintenance.skippedCount} skipped</span>` : ''}
+              </div>
+            </div>
+            <ul class="import-diff-list">
+              ${diff.maintenance.newCount > 0 ? `<li class="import-diff-item">+${diff.maintenance.newCount} PM tasks will be appended.</li>` : ''}
+              ${diff.maintenance.skippedCount > 0 ? `<li class="import-diff-item text-tertiary">${diff.maintenance.skippedCount} maintenance tasks already exist on these units.</li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+
+      const diffBody = `
+        <div class="alert-item ${totals.hasChanges ? 'alert-item-blue' : 'alert-item-green'} mb-md">
+          ${totals.hasChanges ? icons.info : icons.checkCircle}
+          <div>
+            ${totals.hasChanges
+              ? `Found <strong>+${totals.totalNew} new records</strong> and <strong>${totals.totalUpdated} updated units</strong> in <strong>${escapeHtml(file.name)}</strong>.`
+              : `All data in <strong>${escapeHtml(file.name)}</strong> already exists in your local fleet. No new records found.`}
+          </div>
+        </div>
+
+        <div class="import-diff-grid">
+          <div class="import-diff-card new">
+            <div class="diff-val">+${totals.totalNew}</div>
+            <div class="diff-lbl">New to Add</div>
+            <div class="diff-desc">Units, records, fuel & permits</div>
+          </div>
+          <div class="import-diff-card updated">
+            <div class="diff-val">${totals.totalUpdated}</div>
+            <div class="diff-lbl">Units Updated</div>
+            <div class="diff-desc">Higher mileage / hours</div>
+          </div>
+          <div class="import-diff-card skipped">
+            <div class="diff-val">${totals.totalSkipped}</div>
+            <div class="diff-lbl">Duplicates Skipped</div>
+            <div class="diff-desc">Already in your database</div>
+          </div>
+        </div>
+
+        <div class="import-diff-sections">
+          ${equipmentHtml}
+          ${recordsHtml}
+          ${fuelHtml}
+          ${permitsHtml}
+          ${insuranceHtml}
+          ${maintenanceHtml}
+        </div>
+
+        <p class="text-secondary text-sm">
+          <strong>Smart Merge (Recommended)</strong> safely appends new records, updates units with higher mileage, and keeps all existing local data intact.
+        </p>
+      `;
+
+      showModal(
+        'Review Backup & Import',
+        `<div class="import-diff-modal">${diffBody}</div>`,
+        `<button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+         <button class="btn btn-secondary text-danger" id="modal-overwrite-import" title="Erase current local data and restore this backup">${icons.alertTriangle || ''} Replace All Data</button>
+         <button class="btn btn-primary" id="modal-merge-import"${!totals.hasChanges ? ' disabled' : ''}>${icons.upload || ''} Merge & Append New</button>`,
+        (overlay, close) => {
+          overlay.querySelector('#modal-cancel').addEventListener('click', () => {
+            close();
+            importFile.value = '';
+          });
+
+          overlay.querySelector('#modal-merge-import').addEventListener('click', async () => {
+            const button = overlay.querySelector('#modal-merge-import');
+            button.disabled = true;
+            try {
+              const res = await db.mergeAllData(data);
+              close();
+              importFile.value = '';
+              showToast(`Import merged: +${res.totalNew} new records, ${res.totalUpdated} units updated`, 'success');
+              await renderPage();
+            } catch (error) {
+              showToast(error.message, 'error');
+              button.disabled = false;
+            }
+          });
+
+          overlay.querySelector('#modal-overwrite-import').addEventListener('click', async () => {
+            if (!confirm(`Warning: This will overwrite ALL current local data with the backup from "${file.name}". Are you sure you want to proceed?`)) {
+              return;
+            }
+            const button = overlay.querySelector('#modal-overwrite-import');
+            button.disabled = true;
+            try {
+              await db.importAllData(data);
+              close();
+              importFile.value = '';
+              showToast('Backup restored (all previous data replaced)', 'success');
+              await renderPage();
+            } catch (error) {
+              showToast(error.message, 'error');
+              button.disabled = false;
+            }
           });
         }
       );
     } catch (err) {
       showToast(`Import failed: ${err.message}`, 'error');
+      importFile.value = '';
     }
+  }
+
+  // Load seed data
+  container.querySelector('#btn-load-seed')?.addEventListener('click', () => {
+    showModal(
+      'Load UI/UX Test Seed Fleet',
+      `<div class="alert-item alert-item-blue mb-md">
+         ${icons.fuel || ''} <strong>Populate Fleet Pulse for UI/UX testing</strong>
+       </div>
+       <p class="text-secondary mb-md">This loads a complete test fleet: <strong>15 units</strong> (tractors, trailers, and reefers with varied mileage and hours), full maintenance schedules, service records, and <strong>16 fuel receipts</strong> with all product combinations (diesel, DEF, and reefer fuel across multiple months and years).</p>
+       <p class="text-secondary text-sm">This replaces current data in this browser session. Export a backup first if you want to keep existing data.</p>`,
+      `<button class="btn btn-ghost" id="modal-cancel-seed">Cancel</button>
+       <button class="btn btn-primary" id="modal-confirm-seed">Load Seed Fleet</button>`,
+      (overlay, close) => {
+        overlay.querySelector('#modal-cancel-seed').addEventListener('click', close);
+        overlay.querySelector('#modal-confirm-seed').addEventListener('click', async () => {
+          const button = overlay.querySelector('#modal-confirm-seed');
+          button.disabled = true;
+          try {
+            await db.loadSeedData();
+            close();
+            showToast('Seed fleet loaded with 15 units & 16 fuel receipts', 'success');
+            await renderPage();
+          } catch (error) {
+            showToast(error.message, 'error');
+            button.disabled = false;
+          }
+        });
+      }
+    );
   });
 
   // Clear all
@@ -1347,9 +1957,14 @@ function showModal(title, bodyHTML, footerHTML, onMount) {
   };
   document.addEventListener('keydown', onKey);
   overlay.querySelector('input:not([type="file"]):not(:disabled), select, .modal-close')?.focus();
-  overlay.querySelector('.modal-close').addEventListener('click', close);
+  overlay.querySelector('.modal-close')?.addEventListener('click', close);
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) close();
+    const settingsLink = e.target.closest('.go-settings');
+    if (settingsLink) {
+      close();
+      navigate('settings');
+    }
   });
 
   if (onMount) onMount(overlay, close);
@@ -1386,12 +2001,20 @@ function showAddEquipmentModal() {
   let photoDataURL = null;
 
   const body = `
-    <div class="form-group">
-      <label class="form-label">Equipment Photo</label>
-      <div class="photo-upload" id="eq-photo-zone" style="aspect-ratio:3/2;">
-        ${icons.image}
-        <span>Click to upload equipment photo</span>
-        <input type="file" accept="image/*" id="eq-photo-file" />
+    <div class="form-group mb-md">
+      <label class="receipt-upload" id="eq-photo-zone" for="eq-photo-file">
+        <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" id="eq-photo-file" aria-label="Upload equipment photo" />
+        <span class="receipt-upload-icon">${icons.image}</span>
+        <span>
+          <strong id="eq-upload-title">Drop equipment photo here</strong>
+          <span class="text-sm text-secondary">Choose a photo or take one on your phone</span>
+          <span class="text-xs text-tertiary">JPG, PNG, WebP · up to 10 MB</span>
+        </span>
+        <span class="receipt-upload-plus">${icons.plus}</span>
+      </label>
+      <div id="eq-photo-preview" class="hidden mt-xs text-center"></div>
+      <div class="fuel-receipt-tools">
+        <button type="button" class="btn btn-ghost btn-sm hidden" id="eq-remove-photo">Remove photo</button>
       </div>
     </div>
     <div class="form-row">
@@ -1453,17 +2076,49 @@ function showAddEquipmentModal() {
     // Photo upload
     const photoFile = overlay.querySelector('#eq-photo-file');
     const photoZone = overlay.querySelector('#eq-photo-zone');
+    const photoPreview = overlay.querySelector('#eq-photo-preview');
+    const removePhotoBtn = overlay.querySelector('#eq-remove-photo');
+    const uploadTitle = overlay.querySelector('#eq-upload-title');
 
-    async function handleAddPhoto(e) {
-      const file = e.target.files[0];
+    async function handleAddPhoto(file) {
       if (!file) return;
-      photoDataURL = await fileToDataURL(file);
-      photoZone.classList.add('has-image');
-      photoZone.innerHTML = `<img src="${photoDataURL}" alt="Equipment photo" /><input type="file" accept="image/*" id="eq-photo-file" />`;
-      // Re-attach
-      photoZone.querySelector('#eq-photo-file').addEventListener('change', handleAddPhoto);
+      try {
+        photoDataURL = await fileToDataURL(file);
+        photoPreview.innerHTML = `<img src="${photoDataURL}" alt="Equipment photo" style="max-height:160px;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);" />`;
+        photoPreview.classList.remove('hidden');
+        removePhotoBtn.classList.remove('hidden');
+        uploadTitle.textContent = `${file.name || 'Photo'} attached · choose a new photo`;
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (photoFile) photoFile.value = '';
+      }
     }
-    photoFile.addEventListener('change', handleAddPhoto);
+
+    if (photoFile) photoFile.addEventListener('change', (e) => handleAddPhoto(e.target.files?.[0]));
+
+    if (photoZone) {
+      photoZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        photoZone.classList.add('is-dragging');
+      });
+      photoZone.addEventListener('dragleave', () => photoZone.classList.remove('is-dragging'));
+      photoZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        photoZone.classList.remove('is-dragging');
+        if (e.dataTransfer.files?.[0]) handleAddPhoto(e.dataTransfer.files[0]);
+      });
+    }
+
+    if (removePhotoBtn) {
+      removePhotoBtn.addEventListener('click', () => {
+        if (photoFile) photoFile.value = '';
+        photoDataURL = null;
+        photoPreview.innerHTML = '';
+        photoPreview.classList.add('hidden');
+        removePhotoBtn.classList.add('hidden');
+        uploadTitle.textContent = 'Drop equipment photo here';
+      });
+    }
 
     // VIN decode
     overlay.querySelector('#btn-decode-vin').addEventListener('click', async () => {
@@ -1554,11 +2209,22 @@ function showEditEquipmentModal(eq) {
   let photoDataURL = eq.photo || null;
 
   const body = `
-    <div class="form-group">
-      <label class="form-label">Equipment Photo</label>
-      <div class="photo-upload ${eq.photo ? 'has-image' : ''}" id="eq-photo-zone" style="aspect-ratio:3/2;">
-        ${eq.photo ? `<img src="${eq.photo}" alt="Unit ${eq.unitNumber}" />` : `${icons.image}<span>Click to upload</span>`}
-        <input type="file" accept="image/*" id="eq-photo-file" />
+    <div class="form-group mb-md">
+      <label class="receipt-upload" id="edit-eq-photo-zone" for="edit-eq-photo-file">
+        <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" id="edit-eq-photo-file" aria-label="Upload equipment photo" />
+        <span class="receipt-upload-icon">${icons.image}</span>
+        <span>
+          <strong id="edit-eq-upload-title">${photoDataURL ? 'Photo attached · choose a new photo' : 'Drop equipment photo here'}</strong>
+          <span class="text-sm text-secondary">Choose a photo or take one on your phone</span>
+          <span class="text-xs text-tertiary">JPG, PNG, WebP · up to 10 MB</span>
+        </span>
+        <span class="receipt-upload-plus">${icons.plus}</span>
+      </label>
+      <div id="edit-eq-photo-preview" class="${photoDataURL ? '' : 'hidden'} mt-xs text-center">
+        ${photoDataURL ? `<img src="${photoDataURL}" alt="Unit ${escapeHtml(eq.unitNumber)}" style="max-height:160px;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);" />` : ''}
+      </div>
+      <div class="fuel-receipt-tools">
+        <button type="button" class="btn btn-ghost btn-sm ${photoDataURL ? '' : 'hidden'}" id="edit-eq-remove-photo">Remove photo</button>
       </div>
     </div>
     <div class="form-row">
@@ -1605,8 +2271,11 @@ function showEditEquipmentModal(eq) {
   `;
 
   showModal(`Edit Unit ${eq.unitNumber}`, body, footer, (overlay, close) => {
-    const photoFile = overlay.querySelector('#eq-photo-file');
-    const photoZone = overlay.querySelector('#eq-photo-zone');
+    const photoFile = overlay.querySelector('#edit-eq-photo-file');
+    const photoZone = overlay.querySelector('#edit-eq-photo-zone');
+    const photoPreview = overlay.querySelector('#edit-eq-photo-preview');
+    const removePhotoBtn = overlay.querySelector('#edit-eq-remove-photo');
+    const uploadTitle = overlay.querySelector('#edit-eq-upload-title');
 
     // Apply type-appropriate placeholders and engine disabled state
     applyTypePlaceholders(overlay, eq.type);
@@ -1615,15 +2284,45 @@ function showEditEquipmentModal(eq) {
       applyTypePlaceholders(overlay, editTypeSelect.value);
     });
 
-    async function handleEditPhoto(e) {
-      const file = e.target.files[0];
+    async function handleEditPhoto(file) {
       if (!file) return;
-      photoDataURL = await fileToDataURL(file);
-      photoZone.classList.add('has-image');
-      photoZone.innerHTML = `<img src="${photoDataURL}" alt="Equipment photo" /><input type="file" accept="image/*" id="eq-photo-file" />`;
-      photoZone.querySelector('#eq-photo-file').addEventListener('change', handleEditPhoto);
+      try {
+        photoDataURL = await fileToDataURL(file);
+        photoPreview.innerHTML = `<img src="${photoDataURL}" alt="Unit ${escapeHtml(eq.unitNumber)}" style="max-height:160px;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);" />`;
+        photoPreview.classList.remove('hidden');
+        removePhotoBtn.classList.remove('hidden');
+        uploadTitle.textContent = `${file.name || 'Photo'} attached · choose a new photo`;
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (photoFile) photoFile.value = '';
+      }
     }
-    photoFile.addEventListener('change', handleEditPhoto);
+
+    if (photoFile) photoFile.addEventListener('change', (e) => handleEditPhoto(e.target.files?.[0]));
+
+    if (photoZone) {
+      photoZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        photoZone.classList.add('is-dragging');
+      });
+      photoZone.addEventListener('dragleave', () => photoZone.classList.remove('is-dragging'));
+      photoZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        photoZone.classList.remove('is-dragging');
+        if (e.dataTransfer.files?.[0]) handleEditPhoto(e.dataTransfer.files[0]);
+      });
+    }
+
+    if (removePhotoBtn) {
+      removePhotoBtn.addEventListener('click', () => {
+        if (photoFile) photoFile.value = '';
+        photoDataURL = null;
+        photoPreview.innerHTML = '';
+        photoPreview.classList.add('hidden');
+        removePhotoBtn.classList.add('hidden');
+        uploadTitle.textContent = 'Drop equipment photo here';
+      });
+    }
 
     overlay.querySelector('#modal-cancel').addEventListener('click', close);
 
@@ -1640,16 +2339,21 @@ function showEditEquipmentModal(eq) {
         return;
       }
 
-      await db.updateEquipment(eq.id, {
-        unitNumber,
-        type: overlay.querySelector('#eq-type').value,
-        year: overlay.querySelector('#eq-year').value.trim(),
-        make: overlay.querySelector('#eq-make').value.trim(),
-        model: overlay.querySelector('#eq-model').value.trim(),
-        engineSize: overlay.querySelector('#eq-engine').value.trim(),
-        notes: overlay.querySelector('#eq-notes').value.trim(),
-        photo: photoDataURL,
-      });
+      try {
+        await db.updateEquipment(eq.id, {
+          unitNumber,
+          type: overlay.querySelector('#eq-type').value,
+          year: overlay.querySelector('#eq-year').value.trim(),
+          make: overlay.querySelector('#eq-make').value.trim(),
+          model: overlay.querySelector('#eq-model').value.trim(),
+          engineSize: overlay.querySelector('#eq-engine').value.trim(),
+          notes: overlay.querySelector('#eq-notes').value.trim(),
+          photo: photoDataURL,
+        });
+      } catch (error) {
+        showToast(error.message, 'error');
+        return;
+      }
 
       showToast(`Unit ${unitNumber} updated`, 'success');
       close();
@@ -1833,16 +2537,29 @@ function showAddRecordModal(eq) {
 
     ${hasApiKey ? `
       <div class="form-group mb-md">
-        <label class="form-label">Upload Service Record Image (optional)</label>
-        <div class="photo-upload" id="record-upload-zone" style="aspect-ratio:4/3;">
-          ${icons.upload}
-          <span>Click to upload receipt or invoice image</span>
-          <input type="file" accept="image/*" id="record-file" />
+        <label class="receipt-upload" id="record-upload-zone" for="record-file">
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" id="record-file" aria-label="Upload service record image" />
+          <span class="receipt-upload-icon">${icons.wrench}</span>
+          <span>
+            <strong id="record-upload-title">Drop invoice or receipt photo here</strong>
+            <span class="text-sm text-secondary">Choose a photo, scan, or take one on your phone</span>
+            <span class="text-xs text-tertiary">JPG, PNG, WebP · up to 10 MB</span>
+          </span>
+          <span class="receipt-upload-plus">${icons.plus}</span>
+        </label>
+        <div id="record-preview" class="hidden mt-xs text-center"></div>
+        <div class="fuel-receipt-tools">
+          <button type="button" class="btn btn-ghost btn-sm hidden" id="record-remove-photo">Remove receipt</button>
         </div>
-        <div class="form-hint">AI will attempt to extract details — you confirm before saving.</div>
+        <div class="form-hint mt-xs">AI will attempt to extract details — you confirm before saving.</div>
       </div>
-      <div id="record-ocr-result" class="hidden"></div>
-    ` : ''}
+      <div id="record-ocr-result" class="hidden mb-md"></div>
+    ` : `
+      <div class="alert-item alert-item-yellow mb-md">
+        ${icons.alertTriangle}
+        <span>Add a Gemini API key in <strong style="cursor:pointer;text-decoration:underline;" class="go-settings">Settings</strong> to enable photo-based AI assistance.</span>
+      </div>
+    `}
 
     <div class="form-row">
       <div class="form-group">
@@ -1882,62 +2599,113 @@ function showAddRecordModal(eq) {
   showModal('Add Service Record', body, footer, (overlay, close) => {
     // Record image upload with OCR
     const recordFile = overlay.querySelector('#record-file');
-    if (recordFile) {
-      async function handleRecordFile(e) {
-        const file = e.target.files[0];
-        if (!file) return;
+    const uploadZone = overlay.querySelector('#record-upload-zone');
+    const previewEl = overlay.querySelector('#record-preview');
+    const removePhotoBtn = overlay.querySelector('#record-remove-photo');
+    const uploadTitle = overlay.querySelector('#record-upload-title');
+    const ocrResult = overlay.querySelector('#record-ocr-result');
 
+    if (uploadZone) {
+      uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('is-dragging');
+      });
+      uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('is-dragging'));
+      uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('is-dragging');
+        if (e.dataTransfer.files?.[0]) handleRecordFile({ target: { files: e.dataTransfer.files } });
+      });
+    }
+
+    if (removePhotoBtn) {
+      removePhotoBtn.addEventListener('click', () => {
+        if (recordFile) recordFile.value = '';
+        recordImageDataURL = null;
+        previewEl.innerHTML = '';
+        previewEl.classList.add('hidden');
+        removePhotoBtn.classList.add('hidden');
+        uploadTitle.textContent = 'Drop invoice or receipt photo here';
+        ocrResult.innerHTML = '';
+        ocrResult.classList.add('hidden');
+      });
+    }
+
+    async function handleRecordFile(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
         recordImageDataURL = await fileToDataURL(file);
-        const uploadZone = overlay.querySelector('#record-upload-zone');
-        uploadZone.classList.add('has-image');
-        uploadZone.innerHTML = `<img src="${recordImageDataURL}" alt="Service record" /><input type="file" accept="image/*" id="record-file" />`;
-        uploadZone.querySelector('#record-file').addEventListener('change', handleRecordFile);
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (e.target) e.target.value = '';
+        return;
+      }
 
-        // AI extraction
-        const ocrResult = overlay.querySelector('#record-ocr-result');
+      previewEl.innerHTML = `<img src="${recordImageDataURL}" alt="Service record" style="max-height:160px;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);" />`;
+      previewEl.classList.remove('hidden');
+      removePhotoBtn.classList.remove('hidden');
+      uploadTitle.textContent = `${file.name || 'Receipt'} attached · choose a new photo`;
+
+      if (!hasApiKey) {
         ocrResult.classList.remove('hidden');
-        ocrResult.innerHTML = `<div class="card" style="text-align:center;padding:1rem;"><div style="animation:pulse 1.5s infinite;">Analyzing service record...</div></div>`;
+        ocrResult.innerHTML = `
+          <div class="alert-item alert-item-yellow">
+            ${icons.alertTriangle}
+            <span>Add a Gemini API key in <strong style="cursor:pointer;text-decoration:underline;" class="go-settings">Settings</strong> to enable photo-based AI assistance.</span>
+          </div>
+        `;
+        return;
+      }
 
-        try {
-          const result = await readServiceRecord(appSettings.geminiApiKey, file);
+      // AI extraction
+      ocrResult.classList.remove('hidden');
+      ocrResult.innerHTML = `<div class="card" style="text-align:center;padding:1rem;"><div style="animation:pulse 1.5s infinite;">Analyzing service record...</div></div>`;
 
-          if (result.is_service_record) {
-            // Fill in extracted fields (user can override)
-            if (result.date) overlay.querySelector('#rec-date').value = result.date;
-            if (result.mileage && eq.type === 'tractor') overlay.querySelector('#rec-mileage').value = result.mileage;
-            if (result.service_type) overlay.querySelector('#rec-service').value = result.service_type;
-            if (result.shop_name) overlay.querySelector('#rec-shop').value = result.shop_name;
-            if (result.cost) overlay.querySelector('#rec-cost').value = result.cost;
-            if (result.notes) overlay.querySelector('#rec-notes').value = result.notes;
+      try {
+        const result = await readServiceRecord(appSettings.geminiApiKey, file);
 
-            const confColor = result.confidence === 'high' ? 'var(--status-green)' : result.confidence === 'medium' ? 'var(--status-yellow)' : 'var(--status-red)';
-            ocrResult.innerHTML = `
-              <div class="alert-item" style="background:var(--accent-soft);border:1px solid rgba(34,211,238,0.2);">
-                ${icons.checkCircle}
-                <span>
-                  AI extracted details <span style="color:${confColor};font-weight:600;">(${result.confidence} confidence)</span>.
-                  <strong>Review and correct the fields below before saving.</strong>
-                </span>
-              </div>
-            `;
-          } else {
-            ocrResult.innerHTML = `
-              <div class="alert-item alert-item-yellow">
-                ${icons.alertTriangle}
-                <span>Could not identify this as a service record. Fill in details manually.</span>
-              </div>
-            `;
-          }
-        } catch (err) {
-          console.error('Service record OCR error:', err);
+        if (result.is_service_record) {
+          // Fill in extracted fields (user can override)
+          if (result.date) overlay.querySelector('#rec-date').value = result.date;
+          if (result.mileage && eq.type === 'tractor') overlay.querySelector('#rec-mileage').value = result.mileage;
+          if (result.service_type) overlay.querySelector('#rec-service').value = result.service_type;
+          if (result.shop_name) overlay.querySelector('#rec-shop').value = result.shop_name;
+          if (result.cost) overlay.querySelector('#rec-cost').value = result.cost;
+          if (result.notes) overlay.querySelector('#rec-notes').value = result.notes;
+          resizeTextareas(overlay);
+
+          const confColor = result.confidence === 'high' ? 'var(--status-green)' : result.confidence === 'medium' ? 'var(--status-yellow)' : 'var(--status-red)';
           ocrResult.innerHTML = `
-            <div class="alert-item alert-item-red">
+            <div class="alert-item" style="background:var(--accent-soft);border:1px solid rgba(34,211,238,0.2);">
+              ${icons.checkCircle}
+              <span>
+                AI extracted details <span style="color:${confColor};font-weight:600;">(${result.confidence} confidence)</span>.
+                <strong>Review and correct the fields below before saving.</strong>
+              </span>
+            </div>
+          `;
+        } else {
+          ocrResult.innerHTML = `
+            <div class="alert-item alert-item-yellow">
               ${icons.alertTriangle}
-              <span>Unable to analyze service record automatically. Please enter details manually below.</span>
+              <span>Could not identify this as a service record. Fill in details manually.</span>
             </div>
           `;
         }
+      } catch (err) {
+        console.error('Service record OCR error:', err);
+        ocrResult.innerHTML = `
+          <div class="alert-item alert-item-red">
+            ${icons.alertTriangle}
+            <span>Unable to analyze service record automatically. Please enter details manually below.</span>
+          </div>
+        `;
       }
+    }
+
+    if (recordFile) {
       recordFile.addEventListener('change', handleRecordFile);
     }
 
@@ -2023,24 +2791,40 @@ function showEditRecordModal(eq, record) {
   const isTrailer = equipment ? equipment.type === 'trailer' : false;
   const readingLabel = isReefer ? 'Hours' : 'Mileage';
   const currentReading = isReefer ? (record.hours ?? '') : (record.mileage ?? '');
+  const hasApiKey = !demoMode && !!appSettings.geminiApiKey;
 
   const body = `
     <p class="text-secondary text-sm mb-md">
       Editing service record for <strong>${unitLabel}</strong>
     </p>
 
-    <div class="form-group mb-md">
-      <label class="form-label">Service Record Image (optional)</label>
-      <div class="photo-upload ${recordImageDataURL ? 'has-image' : ''}" id="record-upload-zone" style="aspect-ratio:4/3;">
-        ${recordImageDataURL ? `<img src="${recordImageDataURL}" alt="Service record" />` : `${icons.upload}<span>Click to upload receipt or invoice image</span>`}
-        <input type="file" accept="image/*" id="record-file" />
+    ${hasApiKey ? `
+      <div class="form-group mb-md">
+        <label class="receipt-upload" id="edit-record-upload-zone" for="edit-record-file">
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" id="edit-record-file" aria-label="Upload service record image" />
+          <span class="receipt-upload-icon">${icons.wrench}</span>
+          <span>
+            <strong id="edit-record-upload-title">${recordImageDataURL ? 'Receipt attached · choose a new photo' : 'Drop invoice or receipt photo here'}</strong>
+            <span class="text-sm text-secondary">Choose a photo, scan, or take one on your phone</span>
+            <span class="text-xs text-tertiary">JPG, PNG, WebP · up to 10 MB</span>
+          </span>
+          <span class="receipt-upload-plus">${icons.plus}</span>
+        </label>
+        <div id="edit-record-preview" class="${recordImageDataURL ? '' : 'hidden'} mt-xs text-center">
+          ${recordImageDataURL ? `<img src="${recordImageDataURL}" alt="Service record" style="max-height:160px;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);" />` : ''}
+        </div>
+        <div class="fuel-receipt-tools">
+          <button type="button" class="btn btn-ghost btn-sm ${recordImageDataURL ? '' : 'hidden'}" id="edit-record-remove-photo">Remove receipt</button>
+        </div>
+        <div class="form-hint mt-xs">AI will attempt to extract details — you confirm before saving.</div>
       </div>
-      <div class="flex gap-sm mt-xs ${recordImageDataURL ? '' : 'hidden'}" id="record-image-remove-wrap">
-        <button type="button" class="btn btn-ghost btn-sm text-red" id="btn-remove-record-image">
-          ${icons.trash} Remove image
-        </button>
+      <div id="edit-record-ocr-result" class="hidden mb-md"></div>
+    ` : `
+      <div class="alert-item alert-item-yellow mb-md">
+        ${icons.alertTriangle}
+        <span>Add a Gemini API key in <strong style="cursor:pointer;text-decoration:underline;" class="go-settings">Settings</strong> to enable photo-based AI assistance.</span>
       </div>
-    </div>
+    `}
 
     <div class="form-row">
       <div class="form-group">
@@ -2078,32 +2862,114 @@ function showEditRecordModal(eq, record) {
   `;
 
   showModal('Edit Service Record', body, footer, (overlay, close) => {
-    const uploadZone = overlay.querySelector('#record-upload-zone');
-    const removeBtn = overlay.querySelector('#btn-remove-record-image');
-    const removeWrap = overlay.querySelector('#record-image-remove-wrap');
+    const uploadZone = overlay.querySelector('#edit-record-upload-zone');
+    const recordFile = overlay.querySelector('#edit-record-file');
+    const previewEl = overlay.querySelector('#edit-record-preview');
+    const removePhotoBtn = overlay.querySelector('#edit-record-remove-photo');
+    const uploadTitle = overlay.querySelector('#edit-record-upload-title');
+    const ocrResult = overlay.querySelector('#edit-record-ocr-result');
 
-    async function handleEditRecordFile(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      recordImageDataURL = await fileToDataURL(file);
-      uploadZone.classList.add('has-image');
-      uploadZone.innerHTML = `<img src="${recordImageDataURL}" alt="Service record" /><input type="file" accept="image/*" id="record-file" />`;
-      uploadZone.querySelector('#record-file').addEventListener('change', handleEditRecordFile);
-      if (removeWrap) removeWrap.classList.remove('hidden');
+    if (uploadZone) {
+      uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('is-dragging');
+      });
+      uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('is-dragging'));
+      uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('is-dragging');
+        if (e.dataTransfer.files?.[0]) handleEditRecordFile({ target: { files: e.dataTransfer.files } });
+      });
     }
 
-    const recordFile = overlay.querySelector('#record-file');
-    if (recordFile) recordFile.addEventListener('change', handleEditRecordFile);
-
-    if (removeBtn) {
-      removeBtn.addEventListener('click', () => {
+    if (removePhotoBtn) {
+      removePhotoBtn.addEventListener('click', () => {
+        if (recordFile) recordFile.value = '';
         recordImageDataURL = null;
-        uploadZone.classList.remove('has-image');
-        uploadZone.innerHTML = `${icons.upload}<span>Click to upload receipt or invoice image</span><input type="file" accept="image/*" id="record-file" />`;
-        uploadZone.querySelector('#record-file').addEventListener('change', handleEditRecordFile);
-        if (removeWrap) removeWrap.classList.add('hidden');
+        previewEl.innerHTML = '';
+        previewEl.classList.add('hidden');
+        removePhotoBtn.classList.add('hidden');
+        uploadTitle.textContent = 'Drop invoice or receipt photo here';
+        ocrResult.innerHTML = '';
+        ocrResult.classList.add('hidden');
       });
+    }
+
+    async function handleEditRecordFile(e) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+        recordImageDataURL = await fileToDataURL(file);
+      } catch (err) {
+        showToast(err.message, 'error');
+        if (e.target) e.target.value = '';
+        return;
+      }
+
+      previewEl.innerHTML = `<img src="${recordImageDataURL}" alt="Service record" style="max-height:160px;border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);" />`;
+      previewEl.classList.remove('hidden');
+      removePhotoBtn.classList.remove('hidden');
+      uploadTitle.textContent = `${file.name || 'Receipt'} attached · choose a new photo`;
+
+      if (!hasApiKey) {
+        ocrResult.classList.remove('hidden');
+        ocrResult.innerHTML = `
+          <div class="alert-item alert-item-yellow">
+            ${icons.alertTriangle}
+            <span>Add a Gemini API key in <strong style="cursor:pointer;text-decoration:underline;" class="go-settings">Settings</strong> to enable photo-based AI assistance.</span>
+          </div>
+        `;
+        return;
+      }
+
+      // AI extraction
+      ocrResult.classList.remove('hidden');
+      ocrResult.innerHTML = `<div class="card" style="text-align:center;padding:1rem;"><div style="animation:pulse 1.5s infinite;">Analyzing service record...</div></div>`;
+
+      try {
+        const result = await readServiceRecord(appSettings.geminiApiKey, file);
+
+        if (result.is_service_record) {
+          if (result.date) overlay.querySelector('#edit-rec-date').value = result.date;
+          if (result.mileage && !isTrailer && !isReefer) overlay.querySelector('#edit-rec-mileage').value = result.mileage;
+          if (result.service_type) overlay.querySelector('#edit-rec-service').value = result.service_type;
+          if (result.shop_name) overlay.querySelector('#edit-rec-shop').value = result.shop_name;
+          if (result.cost) overlay.querySelector('#edit-rec-cost').value = result.cost;
+          if (result.notes) overlay.querySelector('#edit-rec-notes').value = result.notes;
+          resizeTextareas(overlay);
+
+          const confColor = result.confidence === 'high' ? 'var(--status-green)' : result.confidence === 'medium' ? 'var(--status-yellow)' : 'var(--status-red)';
+          ocrResult.innerHTML = `
+            <div class="alert-item" style="background:var(--accent-soft);border:1px solid rgba(34,211,238,0.2);">
+              ${icons.checkCircle}
+              <span>
+                AI extracted details <span style="color:${confColor};font-weight:600;">(${result.confidence} confidence)</span>.
+                <strong>Review and correct the fields below before saving.</strong>
+              </span>
+            </div>
+          `;
+        } else {
+          ocrResult.innerHTML = `
+            <div class="alert-item alert-item-yellow">
+              ${icons.alertTriangle}
+              <span>Could not identify this as a service record. Fill in details manually.</span>
+            </div>
+          `;
+        }
+      } catch (err) {
+        console.error('Service record OCR error:', err);
+        ocrResult.innerHTML = `
+          <div class="alert-item alert-item-red">
+            ${icons.alertTriangle}
+            <span>Unable to analyze service record automatically. Please enter details manually below.</span>
+          </div>
+        `;
+      }
+    }
+
+    if (recordFile) {
+      recordFile.addEventListener('change', handleEditRecordFile);
     }
 
     overlay.querySelector('#modal-cancel').addEventListener('click', close);
@@ -2437,8 +3303,19 @@ function showImageModal(src) {
 // ─── Bootstrap ────────────────────────────────────────────────
 
 async function init() {
-  if (demoMode) await db.initializeDemo();
-  else if (window.location.hash) localStorage.setItem('fleet_pulse_entered', 'true');
+  initAutoTextareas();
+  if (new URLSearchParams(window.location.search).get('seed') === '1') {
+    await db.loadSeedData();
+  } else if (demoMode) {
+    await db.initializeDemo();
+  } else if (window.location.hash) {
+    localStorage.setItem('fleet_pulse_entered', 'true');
+  }
+  window.seedFleetPulse = async () => {
+    await db.loadSeedData();
+    showToast('Loaded 15 units & 16 fuel receipts', 'success');
+    await renderPage();
+  };
   initTheme();
   document.body.classList.add('dashboard-app');
   const { page } = getRoute();

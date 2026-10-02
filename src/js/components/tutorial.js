@@ -12,45 +12,45 @@ const TUTORIAL_STEPS = [
     title: 'Welcome to Fleet Pulse',
     badge: 'Overview',
     icon: icons.dashboard,
-    headline: 'Commercial Maintenance Built for Small Fleets',
+    headline: 'Commercial fleet maintenance built for owner-operators',
     content: `
-      <p>Fleet Pulse helps owner-operators and small fleets (5–25 trucks) stay ahead of costly engine repairs, DOT violations, and unscheduled downtime.</p>
+      <p>Fleet Pulse helps owner-operators and small fleets stay ahead of costly engine repairs, DOT violations, and unscheduled downtime.</p>
       <div class="tutorial-highlights">
         <div class="tutorial-point">
           <span class="point-badge">✓</span>
-          <span><strong>100% Free & Offline-First:</strong> Runs entirely in your browser with IndexedDB. No login required.</span>
+          <span><strong>Offline-first:</strong> Runs entirely in your browser with IndexedDB. No account or cloud server required.</span>
         </div>
         <div class="tutorial-point">
           <span class="point-badge">✓</span>
-          <span><strong>Dual Triggers:</strong> Services trigger on whichever comes first — mileage traveled or elapsed time.</span>
+          <span><strong>Dual triggers:</strong> Maintenance schedules calculate readiness on whichever comes first: mileage traveled or elapsed time.</span>
         </div>
       </div>
     `,
   },
   {
-    title: 'Unit Numbers vs. VINs',
-    badge: 'Fleet Logic',
+    title: 'Unit numbers and chassis',
+    badge: 'Fleet logic',
     icon: icons.truck,
-    headline: 'Why We Track Equipment by Unit Number',
+    headline: 'Track equipment by door unit numbers',
     content: `
-      <p>Commercial Class 8 diesel engines frequently run <strong>over 1,000,000 miles</strong> and undergo in-frame rebuilds or engine swaps.</p>
+      <p>Commercial Class 8 diesel engines frequently run over one million miles and undergo in-frame rebuilds or engine replacements.</p>
       <div class="tutorial-highlights">
         <div class="tutorial-point">
           <span class="point-badge">!</span>
-          <span><strong>VINs are chassis-bound:</strong> Relying on VIN numbers returns factory specs that don't match swapped engines.</span>
+          <span><strong>VINs are chassis-bound:</strong> VIN lookups return factory delivery specs that often mismatch rebuilt powertrains.</span>
         </div>
         <div class="tutorial-point">
           <span class="point-badge">✓</span>
-          <span><strong>Unit-centric management:</strong> Track Tractors, Trailers, and Refrigerated Units by the numbers painted on their doors.</span>
+          <span><strong>Unit-centric records:</strong> Track tractors, trailers, and refrigerated units by the unit numbers painted on their doors.</span>
         </div>
       </div>
     `,
   },
   {
-    title: 'Preventive Maintenance Schedules',
-    badge: 'PM Schedules',
+    title: 'Preventive maintenance',
+    badge: 'PM schedules',
     icon: icons.wrench,
-    headline: 'Industry-Standard PM-A, PM-B, PM-C & Annual',
+    headline: 'Industry-standard PM intervals and alerts',
     content: `
       <p>Every piece of equipment has a customizable maintenance schedule:</p>
       <div class="tutorial-pm-grid">
@@ -71,47 +71,66 @@ const TUTORIAL_STEPS = [
         </div>
         <div class="pm-mini-card">
           <span class="badge badge-category badge-annual">Annual</span>
-          <strong>DOT / FMCSA Safety Check</strong>
+          <strong>DOT Safety Check</strong>
           <small>Mandatory every 365 days</small>
         </div>
       </div>
-      <p class="text-xs text-secondary mt-sm">Status automatically updates to <span class="text-yellow font-semibold">Due Soon</span> at 15% remaining, or <span class="text-red font-semibold">Overdue</span> when exceeded.</p>
+      <p class="text-xs text-secondary mt-sm">Status automatically flags as <span class="text-yellow font-semibold">Due Soon</span> at 15% remaining, or <span class="text-red font-semibold">Overdue</span> when exceeded.</p>
     `,
   },
   {
-    title: 'AI Vision & Human in the Loop',
-    badge: 'AI Guardrails',
-    icon: icons.camera,
-    headline: 'Instant Photos to Records with 8 Guardrails',
+    title: 'Fuel, permits and insurance',
+    badge: 'Operations',
+    icon: icons.fuel,
+    headline: 'Operating expenses and regulatory compliance',
     content: `
-      <p>Use your phone or webcam to update odometers and file service receipts in seconds with Google Gemini Vision:</p>
+      <p>Track operating costs alongside required state and federal credentials:</p>
       <div class="tutorial-highlights">
         <div class="tutorial-point">
-          <span class="point-badge">📷</span>
-          <span><strong>Odometer OCR:</strong> Reads dusty dashboard clusters and assigns confidence ratings.</span>
+          <span class="point-badge">✓</span>
+          <span><strong>Multi-product fuel stops:</strong> Log diesel, DEF, and reefer fuel in a single transaction with automatic cost per mile and cost per hour metrics.</span>
         </div>
         <div class="tutorial-point">
-          <span class="point-badge">🛡️</span>
-          <span><strong>Zero Auto-Save:</strong> The AI suggests readings, but <em>you</em> always verify and confirm before anything enters the system.</span>
+          <span class="point-badge">✓</span>
+          <span><strong>Permits & insurance:</strong> Monitor IFTA, registration, IRP cab cards, and liability policies with expiration countdowns.</span>
         </div>
       </div>
     `,
   },
   {
-    title: 'Offline Storage & Privacy',
-    badge: 'Data Security',
-    icon: icons.checkCircle,
-    headline: 'Your Fleet Data Stays in Your Hands',
+    title: 'AI assistance and receipt reading',
+    badge: 'AI guardrails',
+    icon: icons.camera,
+    headline: 'Photo extraction with human-in-the-loop review',
     content: `
-      <p>Fleet Pulse works reliably at remote truck yards, highway rest stops, and offline terminals.</p>
+      <p>Use your phone or camera to update odometers and file receipts with optional Gemini AI assistance:</p>
       <div class="tutorial-highlights">
         <div class="tutorial-point">
-          <span class="point-badge">🔒</span>
-          <span><strong>No Cloud Spyware:</strong> Data never leaves your device unless you choose to export it.</span>
+          <span class="point-badge">✓</span>
+          <span><strong>Odometer & receipt reading:</strong> Reads dusty dashboard clusters, hour meters, and multi-product fuel receipts.</span>
         </div>
         <div class="tutorial-point">
-          <span class="point-badge">💾</span>
-          <span><strong>Full Backup & Restore:</strong> Download a full JSON backup of your entire fleet history from Settings anytime.</span>
+          <span class="point-badge">✓</span>
+          <span><strong>Zero auto-save:</strong> The AI suggests extracted values, but you verify every field before saving.</span>
+        </div>
+      </div>
+    `,
+  },
+  {
+    title: 'Smart merge and encrypted backups',
+    badge: 'Data security',
+    icon: icons.lock,
+    headline: 'Private local data with safe driver imports',
+    content: `
+      <p>Fleet Pulse keeps your operational records under your control at all times:</p>
+      <div class="tutorial-highlights">
+        <div class="tutorial-point">
+          <span class="point-badge">✓</span>
+          <span><strong>Smart merge import:</strong> Compare backup files with a pre-import diff and safely append new records from drivers without duplicates.</span>
+        </div>
+        <div class="tutorial-point">
+          <span class="point-badge">✓</span>
+          <span><strong>AES-256-GCM encryption:</strong> Set an optional password when exporting to protect fleet data in transit via text or email.</span>
         </div>
       </div>
     `,

@@ -45,6 +45,12 @@ export function formatMileage(n) {
   return Number(n).toLocaleString('en-US');
 }
 
+/** Format a number as US currency — e.g. $1,234.56 */
+export function formatCurrency(n) {
+  if (n == null || isNaN(n)) return '$0.00';
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 /** Format a date string as "Sep 29, 2026" */
 export function formatDate(isoStr) {
   if (!isoStr) return '—';
@@ -162,14 +168,113 @@ export function showToast(message, type = 'info') {
   }, 3500);
 }
 
+/** Max raw file size allowed (10 MB). */
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+/** Max dimension (width or height) after resize. */
+const MAX_IMAGE_DIMENSION = 1920;
+/** JPEG compression quality (0–1). */
+const IMAGE_QUALITY = 0.8;
+/** Allowed MIME types for image uploads. */
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'];
+
 /**
- * Convert a File/Blob to a data URL for storage in IndexedDB.
+ * Validate actual file bytes against known image magic signatures.
+ * Catches files with wrong extensions (e.g. HEIC renamed to .png).
+ * @param {File} file
+ * @returns {Promise<void>} resolves if valid, rejects with descriptive error
+ */
+function validateImageBytes(file) {
+  return new Promise((resolve, reject) => {
+    const slice = file.slice(0, 12);
+    const reader = new FileReader();
+    reader.onerror = () => resolve(); // If we can't read, let Image() catch it later
+    reader.onload = () => {
+      const arr = new Uint8Array(reader.result);
+      // HEIC / HEIF — "ftyp" at offset 4, then "heic", "heix", "mif1", etc.
+      if (arr.length >= 12) {
+        const ftypStr = String.fromCharCode(arr[4], arr[5], arr[6], arr[7]);
+        if (ftypStr === 'ftyp') {
+          const brand = String.fromCharCode(arr[8], arr[9], arr[10], arr[11]);
+          if (['heic', 'heix', 'mif1', 'hevc', 'hevx'].includes(brand)) {
+            reject(new Error(
+              'This is a HEIC image (iPhone format) with a wrong file extension. ' +
+              'Convert it to JPEG or PNG first, or transfer from your phone with "Most Compatible" format enabled in Settings → Camera → Formats.'
+            ));
+            return;
+          }
+        }
+      }
+      resolve();
+    };
+    reader.readAsArrayBuffer(slice);
+  });
+}
+
+/**
+ * Convert a File/Blob to a compressed data URL for storage in IndexedDB.
+ * - Validates magic bytes to catch mislabeled formats (HEIC as .png).
+ * - Rejects files over MAX_FILE_SIZE.
+ * - Rejects non-image MIME types (HEIC, PDF, etc.).
+ * - Down-scales images larger than MAX_IMAGE_DIMENSION on either axis.
+ * - Re-encodes as JPEG at IMAGE_QUALITY to keep IndexedDB lean.
+ * @param {File} file
+ * @returns {Promise<string>} base64 data URL
  */
 export function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
+    // Validate MIME type
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      reject(new Error(`Unsupported image type "${file.type}". Use JPEG, PNG, or WebP.`));
+      return;
+    }
+    // Validate size
+    if (file.size > MAX_FILE_SIZE) {
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      reject(new Error(`Image is too large (${sizeMB} MB). Maximum is 10 MB.`));
+      return;
+    }
+
+    // Validate actual file bytes (catch HEIC masquerading as PNG, etc.)
+    try {
+      await validateImageBytes(file);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error(
+        'Failed to load image. The file may be corrupt or in an unsupported format.'
+      ));
+      img.onload = () => {
+        let { width, height } = img;
+
+        // Skip resize/compress for small images (under 200 KB)
+        if (file.size < 200 * 1024 && width <= MAX_IMAGE_DIMENSION && height <= MAX_IMAGE_DIMENSION) {
+          resolve(reader.result);
+          return;
+        }
+
+        // Scale down if necessary
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+          const scale = Math.min(MAX_IMAGE_DIMENSION / width, MAX_IMAGE_DIMENSION / height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+
+        // Draw to canvas and re-encode as JPEG
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', IMAGE_QUALITY));
+      };
+      img.src = reader.result;
+    };
     reader.readAsDataURL(file);
   });
 }

@@ -7,7 +7,7 @@ const storage = vi.hoisted(() => ({ databases: new Map(), opens: vi.fn() }));
 vi.mock('idb', () => ({
   openDB: async (name) => {
     storage.opens(name);
-    if (!storage.databases.has(name)) storage.databases.set(name, Object.fromEntries(['equipment', 'maintenance', 'records', 'settings'].map((store) => [store, new Map()])));
+    if (!storage.databases.has(name)) storage.databases.set(name, Object.fromEntries(['equipment', 'maintenance', 'records', 'fuel', 'permits', 'insurance', 'settings'].map((store) => [store, new Map()])));
     const stores = storage.databases.get(name);
     const copy = (value) => value == null ? value : structuredClone(value);
     const put = (store, item) => {

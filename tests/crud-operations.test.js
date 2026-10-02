@@ -23,7 +23,7 @@ vi.mock('idb', () => ({
       storage.databases.set(
         name,
         Object.fromEntries(
-          ['equipment', 'maintenance', 'records', 'settings'].map((store) => [
+          ['equipment', 'maintenance', 'records', 'fuel', 'permits', 'insurance', 'settings'].map((store) => [
             store,
             new Map(),
           ])
@@ -62,6 +62,7 @@ vi.mock('idb', () => ({
       transaction: (storeNames, mode) => {
         return {
           objectStore: (store) => ({
+            getAll: async () => [...stores[store].values()].map(copy),
             clear: async () => {
               stores[store].clear();
             },
@@ -752,5 +753,99 @@ describe('Fleet Pulse — Database CRUD Operations & Edge Cases', () => {
       expect(await db.getAllMaintenance()).toEqual([]);
       expect(await db.getAllRecords()).toEqual([]);
     });
+  });
+});
+
+// Fuel uses the same IndexedDB lifecycle as equipment and service records.
+describe('Fuel persistence and backup compatibility', () => {
+  beforeEach(() => storage.databases.clear());
+  it('creates, edits, exports, imports, and deletes fuel without losing receipts', async () => {
+    const db = await getFreshDB();
+    const equipmentId = await db.addEquipment({ unitNumber: 'FUEL-1', type: 'tractor' });
+    const id = await db.addFuel({ equipmentId, fuelType: 'diesel', date: '2026-09-30', totalCost: 100, receiptImage: 'data:image/jpeg;base64,AAAA' });
+    await db.updateFuel(id, { totalCost: 120, id: 999 });
+    expect(await db.getFuelForEquipment(equipmentId)).toMatchObject([{ id, totalCost: 120 }]);
+    const backup = await db.exportAllData();
+    await db.deleteFuel(id);
+    expect(await db.getAllFuel()).toEqual([]);
+    await db.importAllData(backup);
+    expect(await db.getAllFuel()).toEqual(backup.fuel);
+    expect(backup.fuel[0].receiptImage).toBe('data:image/jpeg;base64,AAAA');
+    await db.deleteEquipment(equipmentId);
+    expect(await db.getAllFuel()).toEqual([]);
+  });
+  it('rejects invalid assignments on create/edit and before replacing a backup', async () => {
+    const db = await getFreshDB();
+    const equipmentId = await db.addEquipment({ unitNumber: 'FUEL-2', type: 'tractor' });
+    const entry = { equipmentId, date: '2026-09-30', totalCost: 50, fuelType: 'diesel' };
+    await expect(db.addFuel({ ...entry, fuelType: 'reefer' })).rejects.toThrow();
+    const id = await db.addFuel(entry);
+    await expect(db.updateFuel(id, { fuelType: 'reefer' })).rejects.toThrow();
+    await expect(db.updateEquipment(equipmentId, { type: 'reefer' })).rejects.toThrow('fuel entries');
+    expect((await db.getEquipment(equipmentId)).type).toBe('tractor');
+    const before = await db.exportAllData();
+    await expect(db.importAllData({ ...before, fuel: [{ ...entry, fuelType: 'reefer' }] })).rejects.toThrow();
+    expect(await db.getAllFuel()).toEqual(before.fuel);
+    expect(await db.getAllEquipment()).toEqual(before.equipment);
+  });
+  it('restores pre-fuel backups with an empty fuel store', async () => {
+    const db = await getFreshDB();
+    const equipmentId = await db.addEquipment({ unitNumber: 'FUEL-3', type: 'tractor' });
+    await db.addFuel({ equipmentId, fuelType: 'def', date: '2026-09-30', totalCost: 40 });
+    const backup = await db.exportAllData();
+    delete backup.fuel;
+    await db.importAllData(backup);
+    expect(await db.getAllFuel()).toEqual([]);
+    expect(await db.getAllEquipment()).toHaveLength(1);
+  });
+});
+
+describe('Combined fuel transactions', () => {
+  beforeEach(() => storage.databases.clear());
+  it('saves one purchase, splits costs by unit, and preserves the other unit on cascade deletion', async () => {
+    const db = await getFreshDB();
+    const truck = await db.addEquipment({ type: 'tractor', unitNumber: 'TRUCK' });
+    const reefer = await db.addEquipment({ type: 'reefer', unitNumber: 'REEFER' });
+    const data = { date: '2026-10-01', receiptImage: 'data:image/jpeg;base64,AAAA', notes: 'One stop', items: [
+      { fuelType: 'diesel', equipmentId: truck, gallons: 100, pricePerGallon: 4, totalCost: 400, odometer: 500000 },
+      { fuelType: 'def', equipmentId: truck, gallons: 10, pricePerGallon: 3, totalCost: 30, odometer: 500000 },
+      { fuelType: 'reefer', equipmentId: reefer, gallons: 20, pricePerGallon: 4, totalCost: 80, hours: 1000 },
+    ] };
+    const id = await db.addFuel(data);
+    expect(await db.getAllFuel()).toMatchObject([{ id, totalCost: 510, items: data.items }]);
+    expect(await db.getFuelForEquipment(truck)).toHaveLength(2);
+    expect(await db.getFuelForEquipment(reefer)).toMatchObject([{ totalCost: 80, hours: 1000 }]);
+    await expect(db.updateEquipment(reefer, { type: 'trailer' })).rejects.toThrow('fuel entries');
+    await db.updateFuel(id, { items: data.items.map(item => item.fuelType === 'diesel' ? { ...item, totalCost: 420 } : item) });
+    const backup = await db.exportAllData();
+    expect(backup.fuel[0].totalCost).toBe(530);
+    await db.importAllData(backup);
+    expect(await db.getAllFuel()).toEqual(backup.fuel);
+    await db.deleteEquipment(truck);
+    expect(await db.getAllFuel()).toMatchObject([{ id, totalCost: 80, receiptImage: data.receiptImage, items: [{ equipmentId: reefer }] }]);
+    await db.deleteEquipment(reefer);
+    expect(await db.getAllFuel()).toEqual([]);
+  });
+  it('rejects the entire purchase when any product has an invalid unit', async () => {
+    const db = await getFreshDB();
+    const truck = await db.addEquipment({ type: 'tractor', unitNumber: 'ONLY-TRUCK' });
+    await expect(db.addFuel({ date: '2026-10-01', items: [
+      { fuelType: 'diesel', equipmentId: truck, totalCost: 400 },
+      { fuelType: 'reefer', equipmentId: truck, totalCost: 80 },
+    ] })).rejects.toThrow();
+    expect(await db.getAllFuel()).toEqual([]);
+  });
+  it('converts a legacy entry when edited and supports removing a product', async () => {
+    const db = await getFreshDB();
+    const truck = await db.addEquipment({ type: 'tractor', unitNumber: 'LEGACY' });
+    const id = await db.addFuel({ equipmentId: truck, fuelType: 'diesel', date: '2026-10-01', totalCost: 100 });
+    await db.updateFuel(id, { items: [
+      { equipmentId: truck, fuelType: 'diesel', totalCost: 100 },
+      { equipmentId: truck, fuelType: 'def', totalCost: 20 },
+    ] });
+    expect(await db.getAllFuel()).toMatchObject([{ id, totalCost: 120 }]);
+    await db.updateFuel(id, { items: [{ equipmentId: truck, fuelType: 'def', totalCost: 20 }] });
+    expect(await db.getFuelForEquipment(truck)).toMatchObject([{ fuelType: 'def', totalCost: 20 }]);
+    expect((await db.getAllFuel())[0]).not.toHaveProperty('fuelType');
   });
 });

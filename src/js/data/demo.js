@@ -26,5 +26,15 @@ export function createDemoData(now = new Date()) {
     shopName: 'Sample fleet shop', cost: [425, 180, 150, 210][index],
     notes: 'Sample service record for the interactive demo.', createdAt: ago(30),
   }));
-  return { version: 1, equipment, maintenance, records, settings: [{ key: 'app', demoInitialized: true, geminiApiKey: '', ocrEnabled: false }] };
+  const fuel = [
+    { id: 1, equipmentId: 1, date: ago(3).slice(0, 10), fuelType: 'diesel', gallons: 142.5, pricePerGallon: 3.899, totalCost: 555.61, odometer: 481800, location: 'Pilot Travel Center, Barstow CA', notes: null },
+    { id: 2, equipmentId: 1, date: ago(8).slice(0, 10), fuelType: 'diesel', gallons: 128.3, pricePerGallon: 3.949, totalCost: 506.67, odometer: 480950, location: 'Love\'s Travel Stop, Needles CA', notes: null },
+    { id: 3, equipmentId: 1, date: ago(8).slice(0, 10), fuelType: 'def', gallons: 12.0, pricePerGallon: 2.799, totalCost: 33.59, odometer: 480950, location: 'Love\'s Travel Stop, Needles CA', notes: 'DEF top-off during fuel stop' },
+    { id: 4, equipmentId: 2, date: ago(5).slice(0, 10), fuelType: 'diesel', gallons: 156.8, pricePerGallon: 3.859, totalCost: 605.09, odometer: 612100, location: 'TA Petro, Kingman AZ', notes: null },
+    { id: 5, equipmentId: 2, date: ago(12).slice(0, 10), fuelType: 'diesel', gallons: 134.2, pricePerGallon: 3.919, totalCost: 525.93, odometer: 611200, location: 'Flying J, Flagstaff AZ', notes: null },
+    { id: 6, equipmentId: 2, date: ago(12).slice(0, 10), fuelType: 'def', gallons: 10.5, pricePerGallon: 2.849, totalCost: 29.91, odometer: 611200, location: 'Flying J, Flagstaff AZ', notes: null },
+    { id: 7, equipmentId: 4, date: ago(4).slice(0, 10), fuelType: 'reefer', gallons: 28.5, pricePerGallon: 3.699, totalCost: 105.42, odometer: null, location: 'Pilot Travel Center, Barstow CA', notes: 'Reefer fuel (dyed diesel)' },
+    { id: 8, equipmentId: 4, date: ago(15).slice(0, 10), fuelType: 'reefer', gallons: 32.1, pricePerGallon: 3.749, totalCost: 120.34, odometer: null, location: 'Love\'s Travel Stop, Ontario CA', notes: null },
+  ].map((entry) => ({ ...entry, receiptImage: null, createdAt: ago(0) }));
+  return { version: 1, equipment, maintenance, records, fuel, settings: [{ key: 'app', demoInitialized: true, geminiApiKey: '', ocrEnabled: false }] };
 }
