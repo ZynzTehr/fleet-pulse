@@ -38,9 +38,9 @@ export function renderWorkboard(container, { equipment, maintenance, records, fu
         <div><dt>Due soon</dt><dd class="${dueSoon.length ? 'text-yellow' : ''}">${dueSoon.length}</dd></div>
         <div><dt>Service spend</dt><dd>${serviceSpend > 0 ? formatCurrency(serviceSpend) : '$0'}</dd></div>
         <div><dt>Fuel spend</dt><dd>${fuelSpend > 0 ? formatCurrency(fuelSpend) : '$0'}</dd></div>
-        <div><dt>Total spend</dt><dd>${totalSpend > 0 ? formatCurrency(totalSpend) : '$0'}</dd></div>
         <div><dt>Insurance spend</dt><dd>${insuranceSpend > 0 ? formatCurrency(insuranceSpend) : '$0'}</dd></div>
         <div><dt>Permit spend</dt><dd>${permitSpend > 0 ? formatCurrency(permitSpend) : '$0'}</dd></div>
+        <div><dt>Total spend</dt><dd>${totalSpend > 0 ? formatCurrency(totalSpend) : '$0'}</dd></div>
       </dl>
       <p class="text-xs text-secondary mb-md">All recorded spending across service, fuel, permits, and commercial insurance policies.</p>
       ${equipment.length ? `<section class="workboard-section" aria-labelledby="attention-title">
