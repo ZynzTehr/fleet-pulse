@@ -233,9 +233,7 @@ Encrypted backups save as `.enc.json`. When imported, Fleet Pulse prompts for th
 
 ## AI use and credits
 
-This project was developed with AI coding assistance. The [prompt log](prompt-log.md) records the requests, decisions, and iterations; the [rubric](rubric.md) describes the presentation requirements.
-
-The project's trucking-specific decisions came from the developer's requirements, including tracking by unit number, accounting for engine changes, and designing PM tier logic around how small fleets actually work.
+This project was developed with AI coding assistance. The project's trucking-specific decisions came from the developer's requirements, including tracking by unit number, accounting for engine changes, and designing PM tier logic around how small fleets actually work.
 
 - [Raul Dronca's Pixel Ripple Button](https://x.com/raul_dronca/status/2093270659824529461) — inspired the landing button interaction (this project implements its own canvas effect)
 - [Google Gemini](https://ai.google.dev/) — optional photo interpretation and interval suggestions
