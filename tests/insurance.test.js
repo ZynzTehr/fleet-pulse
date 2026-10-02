@@ -230,6 +230,13 @@ describe('Commercial Trucking Insurance Domain Service', () => {
         { policyType: 'cargo', expirationDate: '2027-01-01' },
       ];
       expect(checkFleetInsuranceCompliance(fullyCompliant, refDate).length).toBe(0);
+
+      // Empty fleet with 0 equipment has 0 missing compliance requirements
+      expect(checkFleetInsuranceCompliance([], [], refDate).length).toBe(0);
+
+      // Fleet with equipment but no insurance policies has 2 missing compliance requirements
+      const missingWithEquipment = checkFleetInsuranceCompliance([], sampleEquipment, refDate);
+      expect(missingWithEquipment.length).toBe(2);
     });
 
     it('summarizes fleet policies, premium spend, and active counts', () => {
@@ -247,6 +254,15 @@ describe('Commercial Trucking Insurance Domain Service', () => {
       expect(summary.totalPremium).toBe(19500);
       expect(summary.totalCoverage).toBe(1150000);
       expect(summary.missingCount).toBe(0); // auto_liability and cargo are both present (due_soon counts as active coverage)
+
+      // Summary with 0 equipment returns 0 missingCount
+      const emptyFleetSummary = summarizeFleetInsurance([], [], refDate);
+      expect(emptyFleetSummary.missingCount).toBe(0);
+      expect(emptyFleetSummary.total).toBe(0);
+
+      // Summary with equipment and 0 policies returns 2 missingCount
+      const eqNoInsuranceSummary = summarizeFleetInsurance([], sampleEquipment, refDate);
+      expect(eqNoInsuranceSummary.missingCount).toBe(2);
     });
   });
 

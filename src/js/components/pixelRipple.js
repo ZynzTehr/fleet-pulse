@@ -113,6 +113,16 @@ export function initPixelRippleButton(buttonEl, options = {}) {
     ctx.globalAlpha = 1;
     if (ripples.length) requestDraw();
   }
+  let isPointerInteraction = false;
+  listen(hoverSurface, 'pointerdown', () => {
+    isPointerInteraction = true;
+  });
+  listen(window, 'pointerup', () => {
+    setTimeout(() => { isPointerInteraction = false; }, 100);
+  });
+  listen(window, 'pointercancel', () => {
+    isPointerInteraction = false;
+  });
   listen(hoverSurface, 'pointerenter', (event) => {
     pointer = point(event);
     updateTilt(event);
@@ -127,7 +137,16 @@ export function initPixelRippleButton(buttonEl, options = {}) {
   listen(hoverSurface, 'pointerleave', leaveSurface);
   listen(hoverSurface, 'pointercancel', leaveSurface);
   listen(buttonEl, 'blur', leaveSurface);
-  listen(buttonEl, 'focus', () => ripple());
+  listen(buttonEl, 'focus', () => {
+    if (isPointerInteraction) return;
+    try {
+      if (buttonEl.matches(':focus-visible')) {
+        ripple();
+      }
+    } catch {
+      if (!pointer) ripple();
+    }
+  });
   listen(buttonEl, 'click', (event) => {
     if (activated) return;
     if (onClick) activated = true;

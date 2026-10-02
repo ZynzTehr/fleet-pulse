@@ -22,8 +22,8 @@ const today = () => {
 };
 
 export function renderInsurancePage(container, context) {
-  const { equipment, insurance = [], showModal, refresh, navigate } = context;
-  const summary = summarizeFleetInsurance(insurance);
+  const { equipment = [], insurance = [], showModal, refresh, navigate } = context;
+  const summary = summarizeFleetInsurance(insurance, equipment);
 
   container.innerHTML = `
     <div class="page-header">
@@ -56,8 +56,8 @@ export function renderInsurancePage(container, context) {
         </div>
         <div>
           <dt>Compliance Status</dt>
-          <dd class="${summary.missingCount > 0 ? 'text-yellow' : 'text-green'}">
-            ${summary.missingCount > 0 ? `${summary.missingCount} Missing` : 'Compliant'}
+          <dd class="${summary.missingCount > 0 ? 'text-yellow' : (equipment.length === 0 ? 'text-secondary' : 'text-green')}">
+            ${equipment.length === 0 ? 'No Equipment' : (summary.missingCount > 0 ? `${summary.missingCount} Missing` : 'Compliant')}
           </dd>
         </div>
       </dl>
@@ -275,6 +275,16 @@ export function renderInsurancePage(container, context) {
   }
 
   function renderComplianceView() {
+    if (equipment.length === 0) {
+      listContainer.innerHTML = `
+        <div class="card text-center p-xl">
+          <p class="font-semibold text-secondary" style="font-size:1.1rem;margin-bottom:0.5rem;">No Equipment Registered</p>
+          <p class="text-secondary text-sm">Add power units or trailers to your fleet to track FMCSA mandatory insurance compliance.</p>
+        </div>
+      `;
+      return;
+    }
+
     const missing = summary.missingCompliance;
     if (missing.length === 0) {
       listContainer.innerHTML = `

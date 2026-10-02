@@ -185,7 +185,20 @@ export function getInsuranceStatus(policy, referenceDate = new Date()) {
   return { status: 'active', label: 'Active', daysRemaining: diffDays };
 }
 
-export function checkFleetInsuranceCompliance(insuranceList = [], referenceDate = new Date()) {
+export function checkFleetInsuranceCompliance(insuranceList = [], equipmentList = null, referenceDate = new Date()) {
+  let eqList = equipmentList;
+  let refDate = referenceDate;
+
+  if (equipmentList instanceof Date || (typeof equipmentList === 'string' && !Array.isArray(equipmentList))) {
+    refDate = equipmentList;
+    eqList = null;
+  }
+
+  // An empty fleet with 0 equipment has no vehicles requiring insurance compliance
+  if (Array.isArray(eqList) && eqList.length === 0) {
+    return [];
+  }
+
   const mandatoryKeys = ['auto_liability', 'cargo'];
   const missing = [];
 
@@ -193,7 +206,7 @@ export function checkFleetInsuranceCompliance(insuranceList = [], referenceDate 
     const def = INSURANCE_DEFINITIONS[key];
     const hasActivePolicy = insuranceList.some(p => {
       if (p.policyType !== key) return false;
-      const status = getInsuranceStatus(p, referenceDate).status;
+      const status = getInsuranceStatus(p, refDate).status;
       return status === 'active' || status === 'due_soon';
     });
     if (!hasActivePolicy) {
@@ -361,7 +374,15 @@ export function filterInsurance(insurance = [], filters = {}, equipmentList = []
   });
 }
 
-export function summarizeFleetInsurance(insuranceList = [], referenceDate = new Date()) {
+export function summarizeFleetInsurance(insuranceList = [], equipmentList = null, referenceDate = new Date()) {
+  let eqList = equipmentList;
+  let refDate = referenceDate;
+
+  if (equipmentList instanceof Date || (typeof equipmentList === 'string' && !Array.isArray(equipmentList))) {
+    refDate = equipmentList;
+    eqList = null;
+  }
+
   let active = 0;
   let dueSoon = 0;
   let expired = 0;
@@ -369,7 +390,7 @@ export function summarizeFleetInsurance(insuranceList = [], referenceDate = new 
   let totalCoverage = 0;
 
   for (const policy of insuranceList) {
-    const { status } = getInsuranceStatus(policy, referenceDate);
+    const { status } = getInsuranceStatus(policy, refDate);
     if (status === 'expired') expired++;
     else if (status === 'due_soon') dueSoon++;
     else active++;
@@ -382,7 +403,7 @@ export function summarizeFleetInsurance(insuranceList = [], referenceDate = new 
     }
   }
 
-  const missingCompliance = checkFleetInsuranceCompliance(insuranceList, referenceDate);
+  const missingCompliance = checkFleetInsuranceCompliance(insuranceList, eqList, refDate);
 
   return {
     total: insuranceList.length,
